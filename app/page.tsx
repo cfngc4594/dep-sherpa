@@ -27,12 +27,40 @@ import type { RemoteInvestigationReport } from '@/src/core/types';
 type RunState = 'idle' | 'running' | 'ready' | 'approved';
 type InspectorState = 'idle' | 'loading' | 'ready' | 'error';
 type View = 'brief' | 'evidence' | 'patch';
+type Surface = 'investigations' | 'history';
 
 interface InspectorForm {
   repositoryUrl: string;
   manifestPath: string;
   packageName: string;
   targetVersion: string;
+}
+
+interface HistoryEntry {
+  id: string;
+  createdAt: string;
+  form: InspectorForm;
+  report: RemoteInvestigationReport;
+}
+
+const historyStorageKey = 'depsherpa:run-history:v1';
+const historyLimit = 20;
+
+function parseHistory(value: string | null): HistoryEntry[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter((entry): entry is HistoryEntry => Boolean(
+      entry
+      && typeof entry === 'object'
+      && 'id' in entry
+      && 'form' in entry
+      && 'report' in entry,
+    )).slice(0, historyLimit);
+  } catch {
+    return [];
+  }
 }
 
 const views: View[] = ['brief', 'evidence', 'patch'];
@@ -74,6 +102,7 @@ function humanizeSection(section: string): string {
 }
 
 export default function Home() {
+  const [surface, setSurface] = useState<Surface>('investigations');
   const [runState, setRunState] = useState<RunState>('idle');
   const [step, setStep] = useState(-1);
   const [view, setView] = useState<View>('brief');
@@ -82,6 +111,7 @@ export default function Home() {
   const [inspectorError, setInspectorError] = useState('');
   const [remoteReport, setRemoteReport] = useState<RemoteInvestigationReport | null>(null);
   const [copyStatus, setCopyStatus] = useState('');
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -175,6 +205,33 @@ export default function Home() {
         throw new Error(payload.error?.message || 'The investigation could not be completed.');
       }
       setRemoteReport(payload.report);
+      const historyEntry: HistoryEntry = {
+        id: `${payload.report.generatedAt}:${payload.report.repository}:${payload.report.finding.packageName}:${payload.report.finding.targetVersion}`,
+        createdAt: payload.report.generatedAt,
+        form: { ...form },
+        report: payload.report,
+      };
+      let storedHistory = history;
+      try {
+        storedHistory = parseHistory(window.localStorage.getItem(historyStorageKey));
+      } catch {
+        // Continue with in-memory history when browser storage is unavailable.
+      }
+      const nextHistory = [
+        historyEntry,
+        ...storedHistory.filter((entry) => !(
+          entry.form.repositoryUrl === historyEntry.form.repositoryUrl
+          && entry.form.manifestPath === historyEntry.form.manifestPath
+          && entry.form.packageName === historyEntry.form.packageName
+          && entry.form.targetVersion === historyEntry.form.targetVersion
+        )),
+      ].slice(0, historyLimit);
+      setHistory(nextHistory);
+      try {
+        window.localStorage.setItem(historyStorageKey, JSON.stringify(nextHistory));
+      } catch {
+        // History remains available for this tab when browser storage is unavailable.
+      }
       setInspectorState('ready');
       setRunState('idle');
       setStep(-1);
@@ -200,6 +257,36 @@ export default function Home() {
     const nextIndex = (currentIndex + direction + views.length) % views.length;
     setView(views[nextIndex]);
     tabRefs.current[nextIndex]?.focus();
+  };
+
+  const openHistoryEntry = (entry: HistoryEntry) => {
+    setForm(entry.form);
+    setRemoteReport(entry.report);
+    setInspectorState('ready');
+    setInspectorError('');
+    setRunState('idle');
+    setStep(-1);
+    setView('brief');
+    setSurface('investigations');
+  };
+
+  const clearHistory = () => {
+    if (!history.length || !window.confirm('Clear all locally stored DepSherpa run history?')) return;
+    setHistory([]);
+    try {
+      window.localStorage.removeItem(historyStorageKey);
+    } catch {
+      // In-memory history is still cleared.
+    }
+  };
+
+  const showHistory = () => {
+    try {
+      setHistory(parseHistory(window.localStorage.getItem(historyStorageKey)));
+    } catch {
+      // Keep the current in-memory history when browser storage is unavailable.
+    }
+    setSurface('history');
   };
 
   const finding = remoteReport?.finding;
@@ -237,9 +324,9 @@ export default function Home() {
       <aside className="rail" aria-label="Primary navigation">
         <div className="brand-mark" aria-label="DepSherpa"><span className="brand-d">D</span><span className="brand-rule" /></div>
         <nav className="rail-nav">
-          <span className="rail-action rail-action--active" aria-current="page" aria-label="Investigations" title="Investigations"><PackageSearch size={19} /></span>
+          <button className={`rail-action ${surface === 'investigations' ? 'rail-action--active' : ''}`} aria-current={surface === 'investigations' ? 'page' : undefined} aria-label="Investigations" title="Investigations" onClick={() => setSurface('investigations')}><PackageSearch size={19} /></button>
           <button className="rail-action" aria-label="Policies — coming later" title="Policies — coming later" disabled><ShieldCheck size={19} /></button>
-          <button className="rail-action" aria-label="Run history — coming later" title="Run history — coming later" disabled><ClockArrowUp size={19} /></button>
+          <button className={`rail-action ${surface === 'history' ? 'rail-action--active' : ''}`} aria-current={surface === 'history' ? 'page' : undefined} aria-label={`Run history${history.length ? `, ${history.length} saved` : ''}`} title="Run history" onClick={showHistory}><ClockArrowUp size={19} /></button>
         </nav>
         <a className="rail-action rail-github" href="https://github.com/cfngc4594/dep-sherpa" target="_blank" rel="noreferrer" aria-label="DepSherpa on GitHub" title="DepSherpa on GitHub"><CodeXml size={19} /></a>
       </aside>
@@ -247,10 +334,60 @@ export default function Home() {
       <section className="workspace">
         <header className="topbar">
           <div><p className="wordmark">DepSherpa</p><p className="wordmark-note">dependency change control</p></div>
-          <div className="mode-badge" aria-label={isRemote ? 'Current execution mode: live read-only evidence' : 'Current execution mode: deterministic demo'}>
-            <CircleDot size={14} />{isRemote ? 'Live read-only evidence' : 'Deterministic demo'}
+          <div className="mode-badge" aria-label={surface === 'history' ? 'Run history is stored on this device' : isRemote ? 'Current execution mode: live read-only evidence' : 'Current execution mode: deterministic demo'}>
+            {surface === 'history' ? <ClockArrowUp size={14} /> : <CircleDot size={14} />}{surface === 'history' ? 'On-device history' : isRemote ? 'Live read-only evidence' : 'Deterministic demo'}
           </div>
         </header>
+
+        {surface === 'history' ? (
+          <section className="history-view" aria-labelledby="history-title">
+            <div className="history-heading">
+              <div>
+                <p>LOCAL AUDIT TRAIL</p>
+                <h1 id="history-title">Run history</h1>
+                <span>Successful public-repository inspections saved only in this browser.</span>
+              </div>
+              <button type="button" className="history-clear" onClick={clearHistory} disabled={!history.length}>Clear history</button>
+            </div>
+
+            {history.length ? (
+              <ol className="history-list">
+                {history.map((entry) => (
+                  <li key={entry.id} className="history-card">
+                    <button type="button" onClick={() => openHistoryEntry(entry)} aria-label={`Open ${entry.report.repository} ${entry.report.finding.packageName} ${entry.report.finding.targetVersion}`}>
+                      <div className="history-card-topline">
+                        <span>{entry.report.repository}</span>
+                        <time dateTime={entry.createdAt}>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.createdAt))}</time>
+                      </div>
+                      <div className="history-card-main">
+                        <span className="history-monogram">{packageInitial(entry.report.finding.packageName)}</span>
+                        <div>
+                          <h2>{entry.report.finding.packageName}</h2>
+                          <p>{entry.report.baseline.version ?? 'unresolved'} <ArrowRight size={13} /> {entry.report.finding.targetVersion}</p>
+                        </div>
+                        <span className={`history-status history-status--${entry.report.decision.status}`}>{entry.report.decision.status.replaceAll('-', ' ')}</span>
+                      </div>
+                      <div className="history-card-footer">
+                        <span>{entry.report.packageManager}</span>
+                        <span>{entry.report.finding.risk} risk</span>
+                        <span>{entry.report.baseline.source.replace('-', ' ')}</span>
+                        <strong>Open report <ArrowRight size={13} /></strong>
+                      </div>
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className="history-empty">
+                <ClockArrowUp size={30} />
+                <h2>No saved inspections yet.</h2>
+                <p>Run a successful public repository inspection and it will appear here automatically.</p>
+                <button type="button" className="primary-button" onClick={() => setSurface('investigations')}><PackageSearch size={16} /> Start an inspection</button>
+              </div>
+            )}
+          </section>
+        ) : (
+          <>
 
         <section className="intake" aria-labelledby="intake-title">
           <div className="intake-copy">
@@ -436,6 +573,8 @@ export default function Home() {
         </div>
         <p className="sr-only" aria-live="polite" aria-atomic="true">{liveUpdate}</p>
         <p className="copy-toast" aria-live="polite">{copyStatus}</p>
+          </>
+        )}
       </section>
     </main>
   );
