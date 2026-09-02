@@ -11,15 +11,15 @@ The main product workspace (`app/page.tsx`) in Operate mode.
 
 ## Audience, job, and action
 
-A solo TypeScript maintainer opens a prepared dependency investigation, sees exactly what changed and why, runs the investigation, then approves or rejects the proposed patch. The primary action is **Run investigation** until evidence is complete, followed by **Approve patch**.
+A solo TypeScript maintainer can inspect a real public repository before moving into local execution, or replay a prepared dependency investigation and approve or reject its proposed patch. The first live action is **Inspect repository**; the deterministic path retains **Run investigation** and **Approve patch**.
 
 ## Proof and content
 
-The first release uses a clearly labeled synthetic `acme/checkout-ui` scenario: Zod 3.23.8 to 4.1.5, one documented breaking API rename, an initial typecheck failure, a two-line repair, 48 passing tests, and a clean build. Every conclusion points to release evidence, a command, or a diff.
+The release retains the clearly labeled synthetic `acme/checkout-ui` scenario and adds a separately labeled live path that reads a public GitHub `package.json`, verifies an exact npm version, and discovers declared checks. Every live conclusion points to GitHub or npm evidence; every synthetic conclusion points to release evidence, a command, or a diff.
 
 ## Constraints
 
-The interface must work without AWS credentials in deterministic demo mode, preserve an obvious human approval gate, remain keyboard-operable, and adapt to phone widths. It must not imply that a GitHub pull request has been created.
+The interface must work without AWS credentials, distinguish real read-only evidence from simulated execution, preserve an obvious human approval gate for the synthetic patch, remain keyboard-operable, and adapt to phone widths. It must not imply that live repository code ran or that a GitHub pull request was created.
 
 ## Direction and memorable moment
 
@@ -27,4 +27,4 @@ The visual world is an editorial change ledger: off-white revision sheets on a c
 
 ## Unresolved decisions
 
-Real GitHub OAuth, automatic release-note retrieval, and cloud model/provider configuration remain intentionally deferred.
+GitHub OAuth for private repositories, changelog extraction, isolated hosted execution, and cloud model/provider configuration remain intentionally deferred.

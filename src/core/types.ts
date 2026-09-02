@@ -53,3 +53,31 @@ export interface InvestigationReport {
   results: CommandResult[];
   externalWritesAllowed: false;
 }
+
+export interface RepositoryEvidence {
+  owner: string;
+  name: string;
+  url: string;
+  defaultBranch: string;
+  manifestPath: string;
+  manifestSha: string;
+  manifestSize: number;
+  archived: boolean;
+}
+
+export interface RegistryEvidence {
+  packageName: string;
+  targetVersion: string;
+  latestVersion: string | null;
+  description: string | null;
+  repositoryUrl: string | null;
+  homepage: string | null;
+  nodeRequirement: string | null;
+  peerDependencyCount: number;
+}
+
+export interface RemoteInvestigationReport extends InvestigationReport {
+  mode: 'remote-readonly';
+  source: RepositoryEvidence;
+  registry: RegistryEvidence;
+}

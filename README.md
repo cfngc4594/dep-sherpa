@@ -15,9 +15,18 @@ Most dependency bots stop after changing a version. DepSherpa separates six resp
 5. propose a bounded repair;
 6. verify and wait for explicit human approval.
 
-No GitHub write access is implemented in this version. The web demo is synthetic and clearly labeled; the CLI is read-only unless the operator explicitly enables project checks.
+No GitHub write access is implemented in this version. The web workspace clearly separates live read-only metadata from synthetic execution; the CLI is read-only unless the operator explicitly enables project checks.
 
-## Run the interactive demo
+## Use the hosted inspector
+
+The web workspace has two deliberately separate paths:
+
+- **Live read-only evidence** accepts a public GitHub repository URL, a `package.json` path, an npm dependency, and an exact target version. It reads the manifest through the GitHub API, confirms the target through npm, classifies the version jump, discovers repository checks, and produces a copyable JSON report.
+- **Deterministic demo** replays the complete Zod migration story, including a simulated failure, bounded repair, verification, and local approval gate.
+
+The hosted path never clones a repository, installs packages, executes project scripts, changes source, or writes to GitHub. Private repositories are intentionally unsupported until an explicit authentication design is approved.
+
+## Run the workspace locally
 
 Requirements: Node.js 22.13 or newer.
 
@@ -26,7 +35,7 @@ npm install
 npm run dev
 ```
 
-Open the local URL printed by the command. Press **Run investigation**, inspect the evidence and patch tabs, then use the separate approval gate.
+Open the local URL printed by the command. Use the public-repository form for real metadata or press **Run investigation** in the synthetic packet to inspect the complete staged workflow.
 
 ## Inspect a real repository
 
@@ -72,9 +81,10 @@ The evaluation suite covers major, minor, patch, peer, dev, optional, missing, a
 
 ```text
 app/                    interactive web demonstration
+app/api/investigate/    read-only GitHub and npm evidence endpoint
 scripts/depsherpa.ts    command-line entry point
 src/agent/              Strands orchestration adapter
-src/core/               manifest analysis, check runner, report generation
+src/core/               local and remote analysis, check runner, report generation
 src/evals/              deterministic evaluation scenarios
 fixtures/               synthetic judging fixture
 docs/ARCHITECTURE.md    system diagram and trust boundaries
@@ -84,7 +94,8 @@ docs/ARCHITECTURE.md    system diagram and trust boundaries
 
 - npm-compatible JavaScript/TypeScript projects only.
 - Version classification uses semantic-version ranges; exotic protocols are reported as unknown.
-- Release-note retrieval and isolated patch application are represented in the web demonstration but are not yet enabled as autonomous tools.
+- The hosted inspector reads only public repositories and uses unauthenticated upstream APIs, so normal GitHub and npm rate limits apply.
+- Exact npm version verification is live; changelog extraction and isolated patch application remain future work.
 - No branch push, pull request creation, messaging, or other external write occurs.
 
 See [SECURITY.md](SECURITY.md) for the mutation policy and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the orchestration design.

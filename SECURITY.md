@@ -8,7 +8,8 @@ DepSherpa treats source changes and external writes as separate capabilities. Th
 - Project checks are opt-in at the CLI and run without a shell.
 - Captured command output is bounded.
 - Every command has a timeout.
-- The web scenario is synthetic and cannot access a repository.
+- The web inspector can read only public GitHub repository metadata and a selected `package.json`; it cannot access private repositories.
+- Hosted inspection calls fixed GitHub and npm HTTPS origins, validates repository and manifest paths, and never executes fetched content.
 - No token, GitHub credential, or cloud credential is sent to the browser.
 - No code path pushes a branch, creates a pull request, or sends a message.
 

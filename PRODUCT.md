@@ -27,11 +27,12 @@ DepSherpa is not an update bot that opens a version-bump pull request. Its diffe
 - The user starts from a Git repository containing `package.json` and a supported lockfile.
 - Investigations happen alongside ordinary development work and should be resumable.
 - Commands, release-note excerpts, patches, and check results form the audit trail.
-- The hackathon demonstration uses a synthetic fixture repository and clearly labels it as such.
+- The hackathon demonstration includes both a synthetic end-to-end scenario and a live, read-only public-repository evidence path; each mode is clearly labeled.
 
 ## Capabilities and Constraints
 
 - Inspect dependencies and identify an upgrade target.
+- Inspect a public GitHub repository and verify a requested version against the npm registry without cloning or executing it.
 - Summarize the version jump and relevant migration evidence.
 - Work in an isolated branch or worktree and never modify the source repository silently.
 - Run declared lint, typecheck, test, and build checks with timeouts.
@@ -48,6 +49,7 @@ The name is DepSherpa. The voice is precise, calm, and candid about uncertainty.
 ## Evidence on Hand
 
 - A synthetic `acme/checkout-ui` scenario demonstrates a Zod v3-to-v4 migration, including a failing typecheck, a bounded repair, and a green verification run.
+- The hosted inspector can read a selected `package.json` from a public GitHub repository and confirm an exact target version through npm.
 - No customers, usage metrics, production integrations, or award claims exist and none may be fabricated.
 
 ## Product Principles

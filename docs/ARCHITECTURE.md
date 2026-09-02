@@ -7,6 +7,11 @@ flowchart LR
     U[Maintainer] --> UI[Next.js review workspace]
     U --> CLI[DepSherpa CLI]
     UI --> DEMO[Deterministic scenario replay]
+    UI --> API[Read-only evidence endpoint]
+    API --> GH[Public GitHub manifest]
+    API --> NPM[npm version metadata]
+    GH --> CORE
+    NPM --> CORE
     CLI --> CORE[Deterministic investigation core]
     CLI --> AGENT[Strands Agent]
     AGENT --> T1[inspect_manifest tool]
@@ -36,10 +41,14 @@ flowchart LR
 
 The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. It uses `shell: false`, captures bounded output, sets `CI=1`, and terminates commands that exceed the configured timeout.
 
+### Hosted evidence intake
+
+`app/api/investigate/route.ts` accepts a GitHub repository root URL, a path ending in `package.json`, a lowercase npm package name, and an exact target version. It calls only fixed GitHub and npm HTTPS origins, parses the fetched manifest as data, and returns a read-only report. It has no filesystem, command-execution, credential, or mutation capability.
+
 ### External effects
 
 There is no implementation path for branch pushes, pull requests, messages, or account changes. The dotted future edge in the diagram must remain behind a separate approval token if implemented.
 
 ## Demo flow
 
-The hosted web experience replays a synthetic Zod v3-to-v4 migration. It is intentionally deterministic so reviewers can inspect every state without AWS credentials. The same state names map to the planned production workflow, but its simulated command results are never presented as measurements from a real repository.
+The hosted web experience offers two labeled modes. The live path reads real public manifest and npm metadata but stops before code execution. The synthetic Zod v3-to-v4 replay demonstrates the later execution, repair, and approval states without AWS credentials. Simulated command results are never presented as measurements from the live repository.
