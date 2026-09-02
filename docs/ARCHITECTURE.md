@@ -14,6 +14,11 @@ flowchart LR
     GH --> CORE
     NPM --> CORE
     REL --> CORE
+    CLI --> ISO[Disposable clone of committed HEAD]
+    ISO --> NPMRUN[npm install with lifecycle scripts blocked]
+    NPMRUN --> CHECKS
+    NPMRUN --> PATCH[Manifest and lockfile patch]
+    PATCH --> REPORT
     CLI --> CORE[Deterministic investigation core]
     CLI --> AGENT[Strands Agent]
     AGENT --> T1[inspect_manifest tool]
@@ -41,7 +46,7 @@ flowchart LR
 
 ### Command runner
 
-The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. It uses `shell: false`, captures bounded output, sets `CI=1`, and terminates commands that exceed the configured timeout.
+The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. It uses `shell: false`, captures bounded output, sets `CI=1`, and terminates commands that exceed the configured timeout. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, disables npm lifecycle scripts, compares baseline and candidate checks, and captures only manifest/lockfile changes. The temporary clone is removed unless the operator explicitly requests retention.
 
 ### Hosted evidence intake
 

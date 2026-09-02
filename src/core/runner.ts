@@ -3,6 +3,89 @@ import type { CommandResult, ProjectCheck } from './types';
 
 const MAX_OUTPUT = 12_000;
 
+export interface CommandSpec {
+  name: string;
+  executable: string;
+  args: string[];
+  cwd: string;
+  displayCommand?: string;
+  timeoutMs?: number;
+}
+
+function displayCommand(executable: string, args: string[]): string {
+  return [executable, ...args]
+    .map((part) => /^[A-Za-z0-9_./@:=+-]+$/.test(part) ? part : JSON.stringify(part))
+    .join(' ');
+}
+
+export async function runCommand(spec: CommandSpec): Promise<CommandResult> {
+  const startedAt = Date.now();
+  const command = spec.displayCommand ?? displayCommand(spec.executable, spec.args);
+  const timeoutMs = spec.timeoutMs ?? 120_000;
+
+  return await new Promise((resolve) => {
+    const detached = process.platform !== 'win32';
+    const child = spawn(spec.executable, spec.args, {
+      cwd: spec.cwd,
+      env: { ...process.env, CI: '1' },
+      detached,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let output = '';
+    let timedOut = false;
+    let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
+    const append = (chunk: Buffer) => {
+      output = `${output}${chunk.toString()}`.slice(-MAX_OUTPUT);
+    };
+    child.stdout.on('data', append);
+    child.stderr.on('data', append);
+
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        if (detached && child.pid) process.kill(-child.pid, 'SIGTERM');
+        else child.kill('SIGTERM');
+      } catch {
+        child.kill('SIGTERM');
+      }
+      forceKillTimer = setTimeout(() => {
+        try {
+          if (detached && child.pid) process.kill(-child.pid, 'SIGKILL');
+          else child.kill('SIGKILL');
+        } catch {
+          child.kill('SIGKILL');
+        }
+      }, 5_000);
+    }, timeoutMs);
+    child.on('close', (exitCode) => {
+      clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      resolve({
+        name: spec.name,
+        command,
+        status: timedOut ? 'timed_out' : exitCode === 0 ? 'passed' : 'failed',
+        exitCode,
+        durationMs: Date.now() - startedAt,
+        output: output.trim(),
+      });
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      if (forceKillTimer) clearTimeout(forceKillTimer);
+      resolve({
+        name: spec.name,
+        command,
+        status: 'failed',
+        exitCode: null,
+        durationMs: Date.now() - startedAt,
+        output: error.message,
+      });
+    });
+  });
+}
+
 export async function runCheck(
   check: ProjectCheck,
   cwd: string,
@@ -19,47 +102,14 @@ export async function runCheck(
     };
   }
 
-  const startedAt = Date.now();
   const [executable, ...args] = check.command.split(' ');
-
-  return await new Promise((resolve) => {
-    const child = spawn(executable, args, {
-      cwd,
-      env: { ...process.env, CI: '1' },
-      shell: false,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    let output = '';
-    const append = (chunk: Buffer) => {
-      output = `${output}${chunk.toString()}`.slice(-MAX_OUTPUT);
-    };
-    child.stdout.on('data', append);
-    child.stderr.on('data', append);
-
-    const timer = setTimeout(() => child.kill('SIGTERM'), timeoutMs);
-    child.on('close', (exitCode, signal) => {
-      clearTimeout(timer);
-      resolve({
-        name: check.name,
-        command: check.command,
-        status: signal === 'SIGTERM' ? 'timed_out' : exitCode === 0 ? 'passed' : 'failed',
-        exitCode,
-        durationMs: Date.now() - startedAt,
-        output: output.trim(),
-      });
-    });
-    child.on('error', (error) => {
-      clearTimeout(timer);
-      resolve({
-        name: check.name,
-        command: check.command,
-        status: 'failed',
-        exitCode: null,
-        durationMs: Date.now() - startedAt,
-        output: error.message,
-      });
-    });
+  return await runCommand({
+    name: check.name,
+    executable,
+    args,
+    cwd,
+    displayCommand: check.command,
+    timeoutMs,
   });
 }
 

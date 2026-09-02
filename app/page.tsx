@@ -113,9 +113,9 @@ export default function Home() {
     return [
       { ...baseStages[0], detail: `${remoteReport.packageManager} · ${remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
       { ...baseStages[1], detail: remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} matching GitHub release notes retained` : 'npm confirmed · release notes not found' },
-      { ...baseStages[2], detail: 'Requires an isolated local checkout' },
-      { ...baseStages[3], detail: 'Waiting for repository checks' },
-      { ...baseStages[4], detail: 'No patch proposed in read-only mode' },
+      { ...baseStages[2], detail: 'Available through the local npm runner' },
+      { ...baseStages[3], detail: 'Local CLI compares baseline and candidate' },
+      { ...baseStages[4], detail: 'Patch stays inside a disposable clone' },
       { ...baseStages[5], detail: `${availableChecks} checks discovered · not executed` },
     ];
   }, [remoteReport]);
@@ -205,7 +205,7 @@ export default function Home() {
   const displayedEvidence = isRemote ? remoteEvidence : syntheticEvidence;
   const completedStages = isRemote ? 2 : Math.max(0, Math.min(step, baseStages.length));
   const cliCommand = remoteReport
-    ? `npm run depsherpa -- inspect /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion} --run-checks`
+    ? `npm run depsherpa -- upgrade /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion}`
     : '';
 
   const liveUpdate = inspectorState === 'loading'
@@ -367,9 +367,9 @@ export default function Home() {
 
               {view === 'patch' && (isRemote ? (
                 <div className="handoff-view">
-                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>No patch exists yet—and that is intentional.</h3></div><ShieldCheck size={24} /></div>
-                  <p>The hosted inspector never executes untrusted repository code. Clone the project you trust, then hand the same dependency request to the isolated CLI runner.</p>
-                  <div className="command-block"><code>{cliCommand}</code><button type="button" onClick={() => copyText(cliCommand, 'Local runner command copied.')} aria-label="Copy local runner command"><Copy size={15} /></button></div>
+                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>The isolated runner is ready when you are.</h3></div><ShieldCheck size={24} /></div>
+                  <p>Run this inside a local checkout you trust. DepSherpa copies the committed Git state, blocks install scripts, compares checks before and after the upgrade, and returns a reviewable patch without touching the source repository.</p>
+                  <div className="command-block"><code>{cliCommand}</code><button type="button" onClick={() => copyText(cliCommand, 'Isolated upgrade command copied.')} aria-label="Copy isolated upgrade command"><Copy size={15} /></button></div>
                   <div className="check-roster" aria-label="Discovered project checks">
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
                   </div>

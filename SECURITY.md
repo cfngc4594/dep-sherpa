@@ -6,6 +6,9 @@ DepSherpa treats source changes and external writes as separate capabilities. Th
 
 - Manifest inspection is read-only.
 - Project checks are opt-in at the CLI and run without a shell.
+- The `upgrade` command accepts only an npm Git-root path with a committed `package-lock.json`, clones the committed `HEAD` into an operating-system temporary directory, and excludes uncommitted source changes.
+- Dependency preparation and upgrade commands run with npm lifecycle scripts disabled.
+- The candidate patch is limited to `package.json`, `package-lock.json`, and `npm-shrinkwrap.json`; it is reported but never copied back automatically.
 - Captured command output is bounded.
 - Every command has a timeout.
 - The web inspector can read only public GitHub repository metadata and a selected `package.json`; it cannot access private repositories.
@@ -20,4 +23,4 @@ Please open a private GitHub security advisory once the public repository is ava
 
 ## Future mutation policy
 
-Any future patch-application tool must operate inside a disposable worktree, show a complete diff, and require a one-time human approval token. External writes must use a second, separately scoped approval.
+Any future source-code repair tool must stay inside the disposable clone, show a complete diff, and require a one-time human approval token before exporting changes. External writes must use a second, separately scoped approval.

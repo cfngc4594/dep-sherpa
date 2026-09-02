@@ -99,3 +99,52 @@ export interface RemoteInvestigationReport extends InvestigationReport {
   registry: RegistryEvidence;
   releases: ReleaseEvidence;
 }
+
+export type CheckComparisonState =
+  | 'passed'
+  | 'introduced_failure'
+  | 'pre_existing_failure'
+  | 'resolved'
+  | 'not_run';
+
+export interface CheckComparison {
+  name: string;
+  baseline: CommandResult['status'];
+  candidate: CommandResult['status'];
+  state: CheckComparisonState;
+}
+
+export interface RepairSuggestion {
+  check: string;
+  classification: CheckComparisonState;
+  summary: string;
+  nextAction: string;
+  evidence: string;
+}
+
+export interface IsolatedUpgradeReport extends InvestigationReport {
+  mode: 'isolated-local';
+  source: {
+    path: string;
+    gitHead: string;
+    dirtyFilesIgnored: string[];
+  };
+  workspace: {
+    disposable: true;
+    retained: boolean;
+    path: string | null;
+  };
+  preparation: CommandResult;
+  upgrade: CommandResult;
+  baselineResults: CommandResult[];
+  baselineSideEffects: string[];
+  candidateResults: CommandResult[];
+  workspaceChangesAfterChecks: string[];
+  unexpectedCandidateChanges: string[];
+  comparisons: CheckComparison[];
+  changedFiles: string[];
+  patch: string;
+  verdict: 'ready_for_review' | 'needs_repair' | 'inconclusive' | 'blocked';
+  repairSuggestions: RepairSuggestion[];
+  installScriptsAllowed: false;
+}

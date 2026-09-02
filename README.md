@@ -15,7 +15,7 @@ Most dependency bots stop after changing a version. DepSherpa separates six resp
 5. propose a bounded repair;
 6. verify and wait for explicit human approval.
 
-No GitHub write access is implemented in this version. The web workspace clearly separates live read-only metadata from synthetic execution; the CLI is read-only unless the operator explicitly enables project checks.
+No GitHub write access is implemented in this version. The web workspace clearly separates live read-only metadata from synthetic execution. The local CLI can apply a candidate upgrade only inside a disposable clone of the repository's committed state.
 
 ## Use the hosted inspector
 
@@ -57,6 +57,18 @@ Machine-readable output:
 npm run depsherpa -- inspect /path/to/repo zod 4.1.5 --json
 ```
 
+## Run an upgrade in isolation
+
+The isolated runner copies the repository's committed `HEAD` into a disposable directory, installs dependencies with lifecycle scripts disabled, records a baseline, applies the exact target, and reruns the declared checks. It returns the manifest/lockfile patch, distinguishes newly introduced failures from failures that already existed, and retains the first actionable diagnostic with a check-specific next step:
+
+```bash
+npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5
+```
+
+Use `--json` for a machine-readable decision packet. Use `--keep-workspace` only when you need to inspect the disposable checkout manually. Uncommitted source changes are listed in the report but intentionally excluded from the clone.
+
+The first isolated-runner release requires an npm repository whose supplied path is the Git root and whose `package-lock.json` is committed. It never commits, pushes, opens a pull request, or copies the patch back to the source repository.
+
 ## Run with Strands Agents
 
 Strands uses Amazon Bedrock by default. Configure the standard AWS credential chain and model access, then run:
@@ -95,7 +107,7 @@ docs/ARCHITECTURE.md    system diagram and trust boundaries
 - npm-compatible JavaScript/TypeScript projects only.
 - Version classification uses semantic-version ranges; exotic protocols are reported as unknown.
 - The hosted inspector reads only public repositories and uses unauthenticated upstream APIs, so normal GitHub and npm rate limits apply.
-- Exact npm version verification and semver-range GitHub Release matching are live; repository changelog fallback and isolated patch application remain future work.
+- Exact npm version verification, semver-range GitHub Release matching, and isolated npm upgrade execution are live. Repository changelog fallback and bounded source-code repair remain future work.
 - No branch push, pull request creation, messaging, or other external write occurs.
 
 See [SECURITY.md](SECURITY.md) for the mutation policy and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the orchestration design.
