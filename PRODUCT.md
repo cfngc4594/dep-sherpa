@@ -33,6 +33,7 @@ DepSherpa is not an update bot that opens a version-bump pull request. Its diffe
 
 - Inspect dependencies and identify an upgrade target.
 - Inspect a public GitHub repository and verify a requested version against the npm registry without cloning or executing it.
+- Match GitHub Releases from the npm package's declared source repository to the requested semantic-version range, retaining bounded excerpts and source links.
 - Summarize the version jump and relevant migration evidence.
 - Work in an isolated branch or worktree and never modify the source repository silently.
 - Run declared lint, typecheck, test, and build checks with timeouts.
@@ -50,6 +51,7 @@ The name is DepSherpa. The voice is precise, calm, and candid about uncertainty.
 
 - A synthetic `acme/checkout-ui` scenario demonstrates a Zod v3-to-v4 migration, including a failing typecheck, a bounded repair, and a green verification run.
 - The hosted inspector can read a selected `package.json` from a public GitHub repository and confirm an exact target version through npm.
+- The hosted inspector can retain up to six matching GitHub Release records, with an explicit source-gap state when no match is available.
 - No customers, usage metrics, production integrations, or award claims exist and none may be fabricated.
 
 ## Product Principles

@@ -76,8 +76,26 @@ export interface RegistryEvidence {
   peerDependencyCount: number;
 }
 
+export interface ReleaseNoteEvidence {
+  title: string;
+  tag: string;
+  version: string;
+  url: string;
+  publishedAt: string | null;
+  excerpt: string;
+  prerelease: boolean;
+}
+
+export interface ReleaseEvidence {
+  status: 'found' | 'not-found' | 'unavailable';
+  sourceRepositoryUrl: string | null;
+  notes: ReleaseNoteEvidence[];
+  message: string;
+}
+
 export interface RemoteInvestigationReport extends InvestigationReport {
   mode: 'remote-readonly';
   source: RepositoryEvidence;
   registry: RegistryEvidence;
+  releases: ReleaseEvidence;
 }

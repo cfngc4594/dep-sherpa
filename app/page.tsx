@@ -100,6 +100,7 @@ export default function Home() {
     return [
       ['MANIFEST', `${remoteReport.finding.packageName} is declared as ${remoteReport.finding.declaredRange} in ${humanizeSection(remoteReport.finding.section)}.`],
       ['NPM', `${remoteReport.finding.targetVersion} exists; npm latest points to ${remoteReport.registry.latestVersion ?? 'an unreported version'}.`],
+      ['RELEASE', remoteReport.releases.message],
       ['SOURCE', `${remoteReport.source.manifestPath} at ${remoteReport.source.manifestSha.slice(0, 7)} on ${remoteReport.source.defaultBranch}.`],
       ['CHECKS', availableChecks.length ? `Discovered ${availableChecks.join(', ')} scripts for the local runner.` : 'No standard verification scripts were declared.'],
       ['POLICY', 'No repository code was cloned, executed, changed, or pushed by this web inspection.'],
@@ -111,7 +112,7 @@ export default function Home() {
     const availableChecks = remoteReport.checks.filter((check) => check.available).length;
     return [
       { ...baseStages[0], detail: `${remoteReport.packageManager} · ${remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
-      { ...baseStages[1], label: 'Registry evidence', detail: `npm confirmed ${remoteReport.finding.packageName}@${remoteReport.finding.targetVersion}` },
+      { ...baseStages[1], detail: remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} matching GitHub release notes retained` : 'npm confirmed · release notes not found' },
       { ...baseStages[2], detail: 'Requires an isolated local checkout' },
       { ...baseStages[3], detail: 'Waiting for repository checks' },
       { ...baseStages[4], detail: 'No patch proposed in read-only mode' },
@@ -319,10 +320,11 @@ export default function Home() {
                   </dl>
                   <div className="proof-note">
                     <BookOpenText size={17} />
-                    <p><strong>{isRemote ? 'Two primary sources retained' : 'Primary evidence retained'}</strong><br />{isRemote ? (
+                    <p><strong>Primary evidence retained</strong><br />{isRemote ? (
                       <span className="source-links">
                         <a href={`${remoteReport.source.url}/blob/${remoteReport.source.defaultBranch}/${remoteReport.source.manifestPath}`} target="_blank" rel="noreferrer">GitHub manifest <ExternalLink size={11} /></a>
                         <a href={`https://www.npmjs.com/package/${remoteReport.finding.packageName}/v/${remoteReport.finding.targetVersion}`} target="_blank" rel="noreferrer">npm version <ExternalLink size={11} /></a>
+                        {remoteReport.releases.notes[0] && <a href={remoteReport.releases.notes[0].url} target="_blank" rel="noreferrer">Release notes <ExternalLink size={11} /></a>}
                       </span>
                     ) : 'Official migration notes and the repository’s own compiler output will be attached to this packet.'}</p>
                   </div>
@@ -331,13 +333,35 @@ export default function Home() {
 
               {view === 'evidence' && (
                 <div className="evidence-view">
-                  <h3>{isRemote ? 'The remote conclusion has five receipts.' : 'Every conclusion has a receipt.'}</h3>
+                  <h3>{isRemote ? `The remote conclusion has ${displayedEvidence.length} receipts.` : 'Every conclusion has a receipt.'}</h3>
                   <div className="evidence-list">
                     {displayedEvidence.map(([kind, text], index) => {
                       const visible = isRemote || step > index || finished;
-                      return <div key={`${kind}-${text}`} className={visible ? 'evidence-row evidence-row--visible' : 'evidence-row'}><span>{kind}</span><p>{text}</p>{visible ? <Check size={16} /> : <span className="evidence-wait">—</span>}</div>;
+                      const sourceGap = isRemote && kind === 'RELEASE' && remoteReport.releases.status !== 'found';
+                      return <div key={`${kind}-${text}`} className={`${visible ? 'evidence-row evidence-row--visible' : 'evidence-row'} ${sourceGap ? 'evidence-row--gap' : ''}`}><span>{kind}</span><p>{text}</p>{visible ? sourceGap ? <TriangleAlert size={16} /> : <Check size={16} /> : <span className="evidence-wait">—</span>}</div>;
                     })}
                   </div>
+                  {isRemote && (
+                    <section className="release-docket" aria-labelledby="release-docket-title">
+                      <div className="release-docket-heading">
+                        <h4 id="release-docket-title">Release-note docket</h4>
+                        <span>{remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} retained` : 'source gap'}</span>
+                      </div>
+                      {remoteReport.releases.notes.length ? (
+                        <div className="release-note-list">
+                          {remoteReport.releases.notes.map((note) => (
+                            <article key={note.url} className="release-note">
+                              <div className="release-note-meta"><span>{note.tag}</span><time dateTime={note.publishedAt ?? undefined}>{note.publishedAt ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(note.publishedAt)) : 'date unavailable'}</time></div>
+                              <h5><a href={note.url} target="_blank" rel="noreferrer">{note.title}<ExternalLink size={12} /></a></h5>
+                              <p>{note.excerpt}</p>
+                            </article>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="release-empty"><TriangleAlert size={16} /><p><strong>No release prose retained.</strong><br />{remoteReport.releases.message} Treat migration impact as unknown until a maintainer supplies a changelog or migration guide.</p></div>
+                      )}
+                    </section>
+                  )}
                 </div>
               )}
 

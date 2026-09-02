@@ -15,7 +15,7 @@ A solo TypeScript maintainer can inspect a real public repository before moving 
 
 ## Proof and content
 
-The release retains the clearly labeled synthetic `acme/checkout-ui` scenario and adds a separately labeled live path that reads a public GitHub `package.json`, verifies an exact npm version, and discovers declared checks. Every live conclusion points to GitHub or npm evidence; every synthetic conclusion points to release evidence, a command, or a diff.
+The release retains the clearly labeled synthetic `acme/checkout-ui` scenario and adds a separately labeled live path that reads a public GitHub `package.json`, verifies an exact npm version, matches relevant GitHub Releases from the package source, and discovers declared checks. Every live conclusion points to GitHub or npm evidence; missing release prose is labeled as a source gap rather than inferred. Every synthetic conclusion points to release evidence, a command, or a diff.
 
 ## Constraints
 
@@ -27,4 +27,4 @@ The visual world is an editorial change ledger: off-white revision sheets on a c
 
 ## Unresolved decisions
 
-GitHub OAuth for private repositories, changelog extraction, isolated hosted execution, and cloud model/provider configuration remain intentionally deferred.
+GitHub OAuth for private repositories, repository changelog fallback, isolated hosted execution, and cloud model/provider configuration remain intentionally deferred.

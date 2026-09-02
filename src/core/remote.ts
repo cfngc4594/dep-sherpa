@@ -1,6 +1,9 @@
 import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis';
+import semver from 'semver';
 import type {
   PackageManifest,
+  ReleaseEvidence,
+  ReleaseNoteEvidence,
   RegistryEvidence,
   RemoteInvestigationReport,
   RepositoryEvidence,
@@ -57,6 +60,16 @@ interface NpmVersionResponse {
   homepage?: string;
   engines?: { node?: string };
   peerDependencies?: Record<string, string>;
+}
+
+interface GitHubReleaseResponse {
+  name?: string | null;
+  tag_name?: string;
+  html_url?: string;
+  published_at?: string | null;
+  body?: string | null;
+  draft?: boolean;
+  prerelease?: boolean;
 }
 
 type FetchImplementation = typeof fetch;
@@ -132,9 +145,124 @@ function decodeBase64Utf8(value: string): string {
 }
 
 function cleanRepositoryUrl(repository: NpmVersionResponse['repository']): string | null {
-  const raw = typeof repository === 'string' ? repository : repository?.url;
+  const raw = (typeof repository === 'string' ? repository : repository?.url)?.trim();
   if (!raw) return null;
-  return raw.replace(/^git\+/, '').replace(/^git:\/\//, 'https://').replace(/\.git$/, '');
+  return raw
+    .replace(/^github:/, 'https://github.com/')
+    .replace(/^git@github\.com:/, 'https://github.com/')
+    .replace(/^git\+/, '')
+    .replace(/^git:\/\//, 'https://')
+    .replace(/^ssh:\/\/git@github\.com\//, 'https://github.com/')
+    .replace(/\.git(?:#.*)?$/, '');
+}
+
+function releaseExcerpt(body?: string | null): string {
+  if (!body) return 'No summary was supplied with this release. Open the source to inspect the full notes.';
+  const plain = body
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/<!--([\s\S]*?)-->/g, ' ')
+    .replace(/\[([^\]]+)]\([^)]+\)/g, '$1')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/[#>*_`~|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!plain) return 'The release body contains no readable prose. Open the source to inspect the full notes.';
+  return plain.length > 360 ? `${plain.slice(0, 357).trimEnd()}…` : plain;
+}
+
+function releaseVersion(tag: string): string | null {
+  return semver.coerce(tag, { rtl: true })?.version ?? null;
+}
+
+export async function collectReleaseEvidence(
+  repositoryUrl: string | null,
+  currentVersion: string | null,
+  targetVersion: string,
+  fetchImpl: FetchImplementation = fetch,
+): Promise<ReleaseEvidence> {
+  if (!repositoryUrl) {
+    return {
+      status: 'unavailable',
+      sourceRepositoryUrl: null,
+      notes: [],
+      message: 'npm does not declare a source repository for this package.',
+    };
+  }
+
+  let coordinates: { owner: string; repo: string };
+  try {
+    coordinates = parseGitHubRepository(repositoryUrl);
+  } catch {
+    return {
+      status: 'unavailable',
+      sourceRepositoryUrl: repositoryUrl,
+      notes: [],
+      message: 'The npm source repository is not hosted on GitHub, so GitHub Releases could not be checked.',
+    };
+  }
+
+  let releases: GitHubReleaseResponse[];
+  try {
+    const result = await fetchJson<GitHubReleaseResponse[]>(
+      fetchImpl,
+      `https://api.github.com/repos/${encodeURIComponent(coordinates.owner)}/${encodeURIComponent(coordinates.repo)}/releases?per_page=50`,
+      githubHeaders,
+      {
+        code: 'REPOSITORY_NOT_FOUND',
+        message: 'The npm source repository could not be read on GitHub.',
+      },
+    );
+    releases = Array.isArray(result.body) ? result.body : [];
+  } catch (error) {
+    return {
+      status: 'unavailable',
+      sourceRepositoryUrl: repositoryUrl,
+      notes: [],
+      message: error instanceof Error
+        ? `Release evidence is temporarily unavailable: ${error.message}`
+        : 'Release evidence is temporarily unavailable.',
+    };
+  }
+
+  const notes = releases
+    .filter((release) => !release.draft && release.tag_name && release.html_url)
+    .map((release): ReleaseNoteEvidence | null => {
+      const version = releaseVersion(release.tag_name!);
+      if (!version) return null;
+      const isTarget = semver.eq(version, targetVersion);
+      const isInRange = currentVersion
+        ? semver.gt(version, currentVersion) && semver.lte(version, targetVersion)
+        : false;
+      if (!isTarget && !isInRange) return null;
+      return {
+        title: release.name?.trim() || release.tag_name!,
+        tag: release.tag_name!,
+        version,
+        url: release.html_url!,
+        publishedAt: release.published_at ?? null,
+        excerpt: releaseExcerpt(release.body),
+        prerelease: Boolean(release.prerelease),
+      };
+    })
+    .filter((note): note is ReleaseNoteEvidence => note !== null)
+    .sort((left, right) => semver.rcompare(left.version, right.version))
+    .slice(0, 6);
+
+  if (!notes.length) {
+    return {
+      status: 'not-found',
+      sourceRepositoryUrl: repositoryUrl,
+      notes: [],
+      message: `No matching GitHub Release was found among the 50 most recent releases for ${targetVersion}.`,
+    };
+  }
+
+  return {
+    status: 'found',
+    sourceRepositoryUrl: repositoryUrl,
+    notes,
+    message: `${notes.length} GitHub ${notes.length === 1 ? 'release' : 'releases'} matched the requested upgrade range.`,
+  };
 }
 
 async function fetchJson<T>(
@@ -308,6 +436,12 @@ export async function investigateRemote(
     nodeRequirement: npmVersion.engines?.node ?? null,
     peerDependencyCount: Object.keys(npmVersion.peerDependencies ?? {}).length,
   };
+  const releases = await collectReleaseEvidence(
+    registry.repositoryUrl,
+    finding.currentVersion,
+    finding.targetVersion,
+    fetchImpl,
+  );
 
   return {
     mode: 'remote-readonly',
@@ -330,5 +464,6 @@ export async function investigateRemote(
     externalWritesAllowed: false,
     source,
     registry,
+    releases,
   };
 }

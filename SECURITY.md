@@ -10,6 +10,7 @@ DepSherpa treats source changes and external writes as separate capabilities. Th
 - Every command has a timeout.
 - The web inspector can read only public GitHub repository metadata and a selected `package.json`; it cannot access private repositories.
 - Hosted inspection calls fixed GitHub and npm HTTPS origins, validates repository and manifest paths, and never executes fetched content.
+- Release-note bodies are reduced to bounded plain-text excerpts before they enter the report.
 - No token, GitHub credential, or cloud credential is sent to the browser.
 - No code path pushes a branch, creates a pull request, or sends a message.
 

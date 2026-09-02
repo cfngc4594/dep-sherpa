@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  collectReleaseEvidence,
   investigateRemote,
   normalizeManifestPath,
   parseGitHubRepository,
@@ -58,6 +59,28 @@ function successfulFetch() {
     if (url === 'https://registry.npmjs.org/-/package/zod/dist-tags') {
       return jsonResponse({ latest: '4.1.5' });
     }
+    if (url === 'https://api.github.com/repos/colinhacks/zod/releases?per_page=50') {
+      return jsonResponse([
+        {
+          name: 'Zod 4.1.5',
+          tag_name: 'v4.1.5',
+          html_url: 'https://github.com/colinhacks/zod/releases/tag/v4.1.5',
+          published_at: '2026-08-20T10:00:00Z',
+          body: '## Fixes\n\nSee the [migration guide](https://zod.dev/v4).',
+          draft: false,
+          prerelease: false,
+        },
+        {
+          name: 'Zod 4',
+          tag_name: 'v4.0.0',
+          html_url: 'https://github.com/colinhacks/zod/releases/tag/v4.0.0',
+          published_at: '2026-06-01T10:00:00Z',
+          body: 'Major release with documented breaking changes.',
+          draft: false,
+          prerelease: false,
+        },
+      ]);
+    }
     return new Response('not found', { status: 404 });
   });
 }
@@ -86,6 +109,9 @@ describe('remote investigation', () => {
     expect(report.finding.risk).toBe('high');
     expect(report.source.manifestSha).toBe('abc123');
     expect(report.registry.repositoryUrl).toBe('https://github.com/colinhacks/zod');
+    expect(report.releases.status).toBe('found');
+    expect(report.releases.notes.map((note) => note.version)).toEqual(['4.1.5', '4.0.0']);
+    expect(report.releases.notes[0].excerpt).toBe('Fixes See the migration guide.');
     expect(report.checks.find((check) => check.name === 'test')?.available).toBe(true);
     expect(report.results.every((result) => result.status === 'skipped')).toBe(true);
     expect(report.externalWritesAllowed).toBe(false);
@@ -105,6 +131,15 @@ describe('remote investigation', () => {
     }, fetchImpl)).rejects.toMatchObject({
       code: 'REPOSITORY_NOT_FOUND',
       status: 404,
+    });
+  });
+
+  it('keeps the report honest when npm has no source repository', async () => {
+    await expect(collectReleaseEvidence(null, '1.0.0', '2.0.0')).resolves.toEqual({
+      status: 'unavailable',
+      sourceRepositoryUrl: null,
+      notes: [],
+      message: 'npm does not declare a source repository for this package.',
     });
   });
 });

@@ -10,8 +10,10 @@ flowchart LR
     UI --> API[Read-only evidence endpoint]
     API --> GH[Public GitHub manifest]
     API --> NPM[npm version metadata]
+    API --> REL[Package GitHub Releases]
     GH --> CORE
     NPM --> CORE
+    REL --> CORE
     CLI --> CORE[Deterministic investigation core]
     CLI --> AGENT[Strands Agent]
     AGENT --> T1[inspect_manifest tool]
@@ -43,7 +45,7 @@ The CLI executes only four script names already declared by the inspected reposi
 
 ### Hosted evidence intake
 
-`app/api/investigate/route.ts` accepts a GitHub repository root URL, a path ending in `package.json`, a lowercase npm package name, and an exact target version. It calls only fixed GitHub and npm HTTPS origins, parses the fetched manifest as data, and returns a read-only report. It has no filesystem, command-execution, credential, or mutation capability.
+`app/api/investigate/route.ts` accepts a GitHub repository root URL, a path ending in `package.json`, a lowercase npm package name, and an exact target version. It calls only fixed GitHub and npm HTTPS origins, parses the fetched manifest as data, and returns a read-only report. When npm declares a GitHub source repository, it scans the 50 most recent public Releases, semantically matches records inside the requested upgrade range, and retains at most six bounded excerpts with source links. It has no filesystem, command-execution, credential, or mutation capability.
 
 ### External effects
 
