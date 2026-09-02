@@ -1,0 +1,14 @@
+{
+  "name": "@acme/checkout-ui",
+  "private": true,
+  "version": "0.8.0",
+  "packageManager": "pnpm@10.15.1",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "build": "next build"
+  },
+  "dependencies": {
+    "zod": "^3.23.8"
+  }
+}
