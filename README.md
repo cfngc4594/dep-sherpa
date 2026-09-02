@@ -65,9 +65,21 @@ The isolated runner copies the repository's committed `HEAD` into a disposable d
 npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5
 ```
 
+Add `--attempt-repair` to authorize a policy-bounded repair inside the disposable clone. The first recipe handles the documented Zod 3→4 `ZodError.errors` to `.issues` migration only when TypeScript identifies the exact tracked source line. It may change at most three source files and twelve source lines, rejects tests, fixtures, migrations, configuration, untracked paths, and unexplained edits, then reruns every declared check:
+
+```bash
+npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5 --attempt-repair
+```
+
 Use `--json` for a machine-readable decision packet. Use `--keep-workspace` only when you need to inspect the disposable checkout manually. Uncommitted source changes are listed in the report but intentionally excluded from the clone.
 
-The first isolated-runner release requires an npm repository whose supplied path is the Git root and whose `package-lock.json` is committed. It never commits, pushes, opens a pull request, or copies the patch back to the source repository.
+The first isolated-runner release requires an npm repository whose supplied path is the Git root and whose `package-lock.json` is committed. It never commits, pushes, opens a pull request, or copies the patch back to the source repository. npm executes the repository's declared checks normally, so use it only with code and scripts you trust; this release does not provide an operating-system sandbox.
+
+Reproduce the complete Zod failure, one-line repair, and green verification packet with:
+
+```bash
+npm run demo:repair
+```
 
 ## Run with Strands Agents
 
@@ -77,7 +89,7 @@ Strands uses Amazon Bedrock by default. Configure the standard AWS credential ch
 npm run depsherpa -- agent /path/to/repo zod 4.1.5
 ```
 
-The agent receives two intentionally read-only tools: `inspect_manifest` and `inspect_project_checks`. Command execution, file mutation, and external writes are not available to the model in this first safety boundary.
+The agent receives three intentionally read-only tools: `inspect_manifest`, `inspect_project_checks`, and `inspect_repair_policy`. Command execution, file mutation, and external writes are not available directly to the model; deterministic CLI policy owns any repair inside the disposable clone.
 
 ## Verification
 
@@ -107,7 +119,7 @@ docs/ARCHITECTURE.md    system diagram and trust boundaries
 - npm-compatible JavaScript/TypeScript projects only.
 - Version classification uses semantic-version ranges; exotic protocols are reported as unknown.
 - The hosted inspector reads only public repositories and uses unauthenticated upstream APIs, so normal GitHub and npm rate limits apply.
-- Exact npm version verification, semver-range GitHub Release matching, and isolated npm upgrade execution are live. Repository changelog fallback and bounded source-code repair remain future work.
+- Exact npm version verification, semver-range GitHub Release matching, isolated npm upgrades, and one compiler-attributed Zod migration repair are live. Repository changelog fallback and model-proposed general repairs remain future work.
 - No branch push, pull request creation, messaging, or other external write occurs.
 
 See [SECURITY.md](SECURITY.md) for the mutation policy and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the orchestration design.

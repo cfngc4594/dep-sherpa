@@ -115,7 +115,7 @@ export default function Home() {
       { ...baseStages[1], detail: remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} matching GitHub release notes retained` : 'npm confirmed · release notes not found' },
       { ...baseStages[2], detail: 'Available through the local npm runner' },
       { ...baseStages[3], detail: 'Local CLI compares baseline and candidate' },
-      { ...baseStages[4], detail: 'Patch stays inside a disposable clone' },
+      { ...baseStages[4], detail: 'Opt-in · at most 3 source files and 12 lines' },
       { ...baseStages[5], detail: `${availableChecks} checks discovered · not executed` },
     ];
   }, [remoteReport]);
@@ -205,7 +205,7 @@ export default function Home() {
   const displayedEvidence = isRemote ? remoteEvidence : syntheticEvidence;
   const completedStages = isRemote ? 2 : Math.max(0, Math.min(step, baseStages.length));
   const cliCommand = remoteReport
-    ? `npm run depsherpa -- upgrade /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion}`
+    ? `npm run depsherpa -- upgrade /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion} --attempt-repair`
     : '';
 
   const liveUpdate = inspectorState === 'loading'
@@ -367,8 +367,8 @@ export default function Home() {
 
               {view === 'patch' && (isRemote ? (
                 <div className="handoff-view">
-                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>The isolated runner is ready when you are.</h3></div><ShieldCheck size={24} /></div>
-                  <p>Run this inside a local checkout you trust. DepSherpa copies the committed Git state, blocks install scripts, compares checks before and after the upgrade, and returns a reviewable patch without touching the source repository.</p>
+                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>Repair stays opt-in and review-only.</h3></div><ShieldCheck size={24} /></div>
+                  <p>Run this only inside a checkout whose scripts you trust. DepSherpa copies committed Git state, blocks install scripts, compares checks, and may repair compiler-attributed Zod migration failures under a three-source-file, twelve-line limit. The source repository remains untouched.</p>
                   <div className="command-block"><code>{cliCommand}</code><button type="button" onClick={() => copyText(cliCommand, 'Isolated upgrade command copied.')} aria-label="Copy isolated upgrade command"><Copy size={15} /></button></div>
                   <div className="check-roster" aria-label="Discovered project checks">
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}

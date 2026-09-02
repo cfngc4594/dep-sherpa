@@ -1,0 +1,17 @@
+{
+  "name": "depsherpa-zod-repair-demo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "lint": "node -e \"process.exit(0)\"",
+    "typecheck": "tsc --noEmit",
+    "test": "node -e \"process.exit(0)\"",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "zod": "3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

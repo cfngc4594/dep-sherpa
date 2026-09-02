@@ -122,6 +122,33 @@ export interface RepairSuggestion {
   evidence: string;
 }
 
+export interface RepairPolicyLimits {
+  maxFiles: number;
+  maxChangedLines: number;
+  allowedExtensions: string[];
+  forbiddenPathPatterns: string[];
+}
+
+export interface RepairAttempt {
+  requested: boolean;
+  status:
+    | 'not_requested'
+    | 'not_needed'
+    | 'unsupported'
+    | 'policy_rejected'
+    | 'verified'
+    | 'failed_verification';
+  recipeId: string | null;
+  rationale: string;
+  evidence: string[];
+  changedFiles: string[];
+  changedLines: number;
+  patch: string;
+  verificationResults: CommandResult[];
+  unexpectedChanges: string[];
+  policy: RepairPolicyLimits;
+}
+
 export interface IsolatedUpgradeReport extends InvestigationReport {
   mode: 'isolated-local';
   source: {
@@ -142,9 +169,12 @@ export interface IsolatedUpgradeReport extends InvestigationReport {
   workspaceChangesAfterChecks: string[];
   unexpectedCandidateChanges: string[];
   comparisons: CheckComparison[];
+  upgradeChangedFiles: string[];
+  upgradePatch: string;
   changedFiles: string[];
   patch: string;
-  verdict: 'ready_for_review' | 'needs_repair' | 'inconclusive' | 'blocked';
+  verdict: 'ready_for_review' | 'repaired_ready_for_review' | 'needs_repair' | 'inconclusive' | 'blocked';
   repairSuggestions: RepairSuggestion[];
+  repair: RepairAttempt;
   installScriptsAllowed: false;
 }

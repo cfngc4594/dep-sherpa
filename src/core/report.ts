@@ -17,7 +17,8 @@ Generated: ${report.generatedAt}
 - Target: \`${finding.targetVersion}\`
 - Release type: ${finding.releaseType ?? 'unknown'}
 - Risk: **${finding.risk}**
-- External writes: **blocked**
+- DepSherpa external writes: **blocked**
+- Repository scripts: **trusted local code; not OS-sandboxed**
 
 ${finding.reasons.map((reason) => `- ${reason}`).join('\n')}
 
@@ -52,6 +53,14 @@ export function renderIsolatedUpgradeReport(report: IsolatedUpgradeReport): stri
   const sideEffects = report.unexpectedCandidateChanges.length
     ? report.unexpectedCandidateChanges.map((entry) => `- \`${entry}\``).join('\n')
     : '- None detected.';
+  const repairChecks = report.repair.verificationResults.length
+    ? report.repair.verificationResults
+        .map((result) => `| ${result.name} | ${result.status} | ${result.durationMs} ms |`)
+        .join('\n')
+    : '| — | not run | — |';
+  const repairEvidence = report.repair.evidence.length
+    ? report.repair.evidence.map((item) => `- ${item}`).join('\n')
+    : '- No source diagnostic was used.';
 
   return `# DepSherpa isolated upgrade: ${report.finding.packageName}
 
@@ -66,7 +75,8 @@ Generated: ${report.generatedAt}
 - Risk: **${report.finding.risk}**
 - Verdict: **${report.verdict}**
 - Install lifecycle scripts: **blocked**
-- External writes: **blocked**
+- DepSherpa external writes: **blocked**
+- Repository scripts: **trusted local code; not OS-sandboxed**
 
 Source changes intentionally excluded from the clone:
 ${dirtySource}
@@ -80,6 +90,23 @@ ${comparisons}
 ## Repair triage
 
 ${suggestions}
+
+## Bounded repair attempt
+
+- Requested: **${report.repair.requested ? 'yes' : 'no'}**
+- Status: **${report.repair.status}**
+- Recipe: ${report.repair.recipeId ? `\`${report.repair.recipeId}\`` : 'none'}
+- Scope: ${report.repair.changedFiles.length} files, ${report.repair.changedLines} source lines
+- Policy: at most ${report.repair.policy.maxFiles} source files and ${report.repair.policy.maxChangedLines} changed source lines; tests, fixtures, migrations, and configuration remain blocked
+
+${report.repair.rationale}
+
+Evidence authorizing the repair:
+${repairEvidence}
+
+| Repair verification | Result | Duration |
+| --- | --- | ---: |
+${repairChecks}
 
 ## Upgrade-owned files
 

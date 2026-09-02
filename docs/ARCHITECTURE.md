@@ -18,13 +18,19 @@ flowchart LR
     ISO --> NPMRUN[npm install with lifecycle scripts blocked]
     NPMRUN --> CHECKS
     NPMRUN --> PATCH[Manifest and lockfile patch]
+    CHECKS --> POLICY{Bounded repair policy}
+    POLICY -->|compiler-attributed recipe| REPAIR[Source edit in disposable clone]
+    REPAIR --> VERIFY[Run every declared check again]
+    VERIFY --> REPORT
     PATCH --> REPORT
     CLI --> CORE[Deterministic investigation core]
     CLI --> AGENT[Strands Agent]
     AGENT --> T1[inspect_manifest tool]
     AGENT --> T2[inspect_project_checks tool]
+    AGENT --> T3[inspect_repair_policy tool]
     T1 --> CORE
     T2 --> CORE
+    T3 --> POLICY
     CORE --> MANIFEST[package.json]
     CORE --> CHECKS[Declared repository checks]
     CHECKS --> REPORT[Evidence report]
@@ -42,11 +48,15 @@ flowchart LR
 
 ### Strands orchestration
 
-`src/agent/strands.ts` gives the model two read-only tools. The system prompt requires tool evidence, distinguishes facts from hypotheses, and keeps the final human decision explicit. The model cannot execute commands or mutate files through these tools.
+`src/agent/strands.ts` gives the model three read-only tools for manifest facts, declared checks, and the immutable repair policy. The system prompt requires tool evidence, distinguishes facts from hypotheses, and keeps the final human decision explicit. The model cannot execute commands or mutate files through these tools.
 
 ### Command runner
 
-The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. It uses `shell: false`, captures bounded output, sets `CI=1`, and terminates commands that exceed the configured timeout. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, disables npm lifecycle scripts, compares baseline and candidate checks, and captures only manifest/lockfile changes. The temporary clone is removed unless the operator explicitly requests retention.
+The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. DepSherpa spawns npm with `shell: false`, captures bounded output, sets `CI=1`, and terminates the process group when a command exceeds its timeout. npm still executes repository scripts with normal npm semantics, so the first release requires a repository the operator trusts and does not claim OS-level network or filesystem isolation. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, disables npm lifecycle scripts, compares baseline and candidate checks, and captures only manifest/lockfile changes. The temporary clone is removed unless the operator explicitly requests retention.
+
+### Bounded repair policy
+
+Repair is a separate opt-in capability. The first deterministic recipe consumes an exact TypeScript diagnostic for the documented Zod 3→4 property migration, confirms that the diagnosed tracked source file imports Zod, and edits only the referenced line. A fixed policy caps the proposal at three allowed source files and twelve source lines and rejects tests, fixtures, migrations, configuration, and unexplained file changes. The complete patch is captured before verification; all declared checks run again, and any verification-time patch mutation prevents a verified result. Future Strands-generated proposals must enter through this same policy boundary rather than receiving direct filesystem tools.
 
 ### Hosted evidence intake
 

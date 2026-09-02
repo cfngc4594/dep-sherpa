@@ -37,7 +37,7 @@ DepSherpa is not an update bot that opens a version-bump pull request. Its diffe
 - Summarize the version jump and relevant migration evidence.
 - Copy the committed Git state into a disposable local clone, apply an exact npm target there, and never modify the source repository silently.
 - Run declared lint, typecheck, test, and build checks with timeouts.
-- Attempt bounded, explainable repairs and record every mutation.
+- Attempt policy-bounded, compiler-attributed repairs inside the disposable clone and record every mutation; the first shipped recipe covers the Zod 3→4 `.errors` to `.issues` migration.
 - Require human approval before exporting a patch or creating a draft pull request.
 - Use the Strands Agents SDK for orchestration; provide a deterministic demo mode when cloud credentials are absent.
 - First release targets npm-compatible TypeScript projects. Other ecosystems are open decisions.
@@ -53,6 +53,7 @@ The name is DepSherpa. The voice is precise, calm, and candid about uncertainty.
 - The hosted inspector can read a selected `package.json` from a public GitHub repository and confirm an exact target version through npm.
 - The hosted inspector can retain up to six matching GitHub Release records, with an explicit source-gap state when no match is available.
 - The local npm runner records baseline and candidate checks, classifies introduced versus pre-existing failures, retains bounded first-error diagnostics with check-specific next steps, and emits a manifest/lockfile patch from a disposable clone.
+- A real Zod 3.23.8→4.1.5 run produced the expected TypeScript failures, changed one compiler-attributed source line, passed all four post-repair checks, and returned `repaired_ready_for_review` without changing the source repository.
 - No customers, usage metrics, production integrations, or award claims exist and none may be fabricated.
 
 ## Product Principles

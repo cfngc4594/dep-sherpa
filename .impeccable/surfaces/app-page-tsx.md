@@ -19,7 +19,7 @@ The release retains the clearly labeled synthetic `acme/checkout-ui` scenario an
 
 ## Constraints
 
-The interface must work without AWS credentials, distinguish real read-only evidence from simulated execution, preserve an obvious human approval gate for the synthetic patch, remain keyboard-operable, and adapt to phone widths. The local handoff may describe the shipped isolated npm runner, but it must not imply that hosted repository code ran or that a GitHub pull request was created.
+The interface must work without AWS credentials, distinguish real read-only evidence from simulated execution, preserve an obvious human approval gate for the synthetic patch, remain keyboard-operable, and adapt to phone widths. The local handoff may describe the shipped isolated npm runner and its opt-in bounded Zod repair, but it must name the trust boundary for repository scripts and must not imply that hosted repository code ran or that a GitHub pull request was created.
 
 ## Direction and memorable moment
 
@@ -27,4 +27,4 @@ The visual world is an editorial change ledger: off-white revision sheets on a c
 
 ## Unresolved decisions
 
-GitHub OAuth for private repositories, repository changelog fallback, bounded source-code repair, isolated hosted execution, and cloud model/provider configuration remain intentionally deferred.
+GitHub OAuth for private repositories, repository changelog fallback, model-proposed general repair recipes, isolated hosted execution, and cloud model/provider configuration remain intentionally deferred.

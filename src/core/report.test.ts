@@ -19,7 +19,7 @@ describe('report rendering', () => {
       externalWritesAllowed: false,
     };
     const markdown = renderMarkdownReport(report);
-    expect(markdown).toContain('External writes: **blocked**');
+    expect(markdown).toContain('DepSherpa external writes: **blocked**');
     expect(markdown).toContain('explicit human decision');
   });
 
@@ -32,7 +32,8 @@ describe('report rendering', () => {
       source: { path: '/repo', gitHead: 'abc123', dirtyFilesIgnored: [] }, workspace: { disposable: true, retained: false, path: null },
       preparation: { ...command, name: 'prepare_dependencies', command: 'npm ci' }, upgrade: { ...command, name: 'apply_upgrade', command: 'npm install zod@4.5.4' },
       baselineResults: [command], baselineSideEffects: [], candidateResults: [command], workspaceChangesAfterChecks: [' M package.json'], unexpectedCandidateChanges: [], comparisons: [{ name: 'test', baseline: 'passed', candidate: 'passed', state: 'passed' }],
-      changedFiles: ['package.json'], patch: '-  "zod": "4.5.3"\n+  "zod": "4.5.4"', verdict: 'ready_for_review', repairSuggestions: [], installScriptsAllowed: false,
+      upgradeChangedFiles: ['package.json'], upgradePatch: '-  "zod": "4.5.3"\n+  "zod": "4.5.4"', changedFiles: ['package.json'], patch: '-  "zod": "4.5.3"\n+  "zod": "4.5.4"', verdict: 'ready_for_review', repairSuggestions: [],
+      repair: { requested: false, status: 'not_requested', recipeId: null, rationale: 'Not requested.', evidence: [], changedFiles: [], changedLines: 0, patch: '', verificationResults: [], unexpectedChanges: [], policy: { maxFiles: 3, maxChangedLines: 12, allowedExtensions: ['.ts'], forbiddenPathPatterns: ['tests/'] } }, installScriptsAllowed: false,
     };
     const markdown = renderIsolatedUpgradeReport(report);
     expect(markdown).toContain('disposable clone');

@@ -4,6 +4,7 @@ import path from 'node:path';
 import semver from 'semver';
 import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis';
 import { readManifest } from './manifest';
+import { attemptBoundedRepair, emptyRepairAttempt } from './repair';
 import { runChecks, runCommand } from './runner';
 import type {
   CheckComparison,
@@ -20,6 +21,7 @@ export interface IsolatedUpgradeOptions {
   targetVersion: string;
   timeoutMs?: number;
   keepWorkspace?: boolean;
+  attemptRepair?: boolean;
 }
 
 async function commandOutput(executable: string, args: string[], cwd: string): Promise<string> {
@@ -153,7 +155,9 @@ async function gitPatch(workspacePath: string): Promise<{ changedFiles: string[]
 
 async function workspaceStatus(workspacePath: string): Promise<string[]> {
   const status = await commandOutput('git', ['status', '--porcelain=v1', '--untracked-files=normal'], workspacePath);
-  return status ? status.split('\n').filter(Boolean).slice(0, 200) : [];
+  return status
+    ? status.split('\n').filter((entry) => entry && statusPath(entry) !== 'node_modules/').slice(0, 200)
+    : [];
 }
 
 export function statusPath(entry: string): string {
@@ -172,7 +176,9 @@ export async function upgradeInIsolation(
 
   const gitHead = await commandOutput('git', ['rev-parse', 'HEAD'], sourcePath);
   const dirtyOutput = await commandOutput('git', ['status', '--porcelain=v1'], sourcePath);
-  const dirtyFilesIgnored = dirtyOutput ? dirtyOutput.split('\n').filter(Boolean) : [];
+  const dirtyFilesIgnored = dirtyOutput
+    ? dirtyOutput.split('\n').filter((entry) => entry && statusPath(entry) !== 'node_modules/')
+    : [];
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'depsherpa-'));
   const workspacePath = path.join(temporaryRoot, 'workspace');
 
@@ -269,6 +275,30 @@ export async function upgradeInIsolation(
         candidateResults.find((result) => result.name === comparison.name),
       ))
       .filter((suggestion): suggestion is RepairSuggestion => suggestion !== null);
+    const baseVerdict = classifyVerdict(preparation, upgrade, comparisons, unexpectedCandidateChanges);
+    const hasPreExistingFailure = comparisons.some((comparison) => comparison.state === 'pre_existing_failure');
+    const repair = !options.attemptRepair
+      ? emptyRepairAttempt(false, 'not_requested', 'Automatic repair was not requested.')
+      : baseVerdict === 'ready_for_review'
+        ? emptyRepairAttempt(true, 'not_needed', 'All candidate checks passed; no source repair was needed.')
+        : baseVerdict === 'needs_repair' && !hasPreExistingFailure && unexpectedCandidateChanges.length === 0
+          ? await attemptBoundedRepair({
+              requested: true,
+              workspacePath,
+              finding,
+              checks,
+              candidateResults,
+              timeoutMs: options.timeoutMs,
+            })
+          : emptyRepairAttempt(
+              true,
+              'policy_rejected',
+              'Repair was not attempted because the candidate contained pre-existing failures, check side effects, or an incomplete setup.',
+            );
+    const finalResults = repair.verificationResults.length ? repair.verificationResults : candidateResults;
+    const finalChangedFiles = repair.patch ? repair.changedFiles : changedFiles;
+    const finalPatch = repair.patch || patch;
+    const verdict = repair.status === 'verified' ? 'repaired_ready_for_review' : baseVerdict;
 
     const report: IsolatedUpgradeReport = {
       mode: 'isolated-local',
@@ -278,7 +308,7 @@ export async function upgradeInIsolation(
       packageManager,
       finding,
       checks,
-      results: candidateResults,
+      results: finalResults,
       externalWritesAllowed: false,
       source: { path: sourcePath, gitHead, dirtyFilesIgnored },
       workspace: {
@@ -294,10 +324,13 @@ export async function upgradeInIsolation(
       workspaceChangesAfterChecks,
       unexpectedCandidateChanges,
       comparisons,
-      changedFiles,
-      patch,
-      verdict: classifyVerdict(preparation, upgrade, comparisons, unexpectedCandidateChanges),
+      upgradeChangedFiles: changedFiles,
+      upgradePatch: patch,
+      changedFiles: finalChangedFiles,
+      patch: finalPatch,
+      verdict,
       repairSuggestions,
+      repair,
       installScriptsAllowed: false,
     };
     return report;
