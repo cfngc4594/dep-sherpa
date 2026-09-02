@@ -4,6 +4,8 @@ import {
   investigateRemote,
   normalizeManifestPath,
   parseGitHubRepository,
+  versionFromBunLock,
+  versionFromPackageLock,
 } from './remote';
 
 const manifest = {
@@ -14,6 +16,10 @@ const manifest = {
 };
 
 const manifestContent = Buffer.from(JSON.stringify(manifest), 'utf8').toString('base64');
+const packageLockContent = Buffer.from(JSON.stringify({
+  lockfileVersion: 3,
+  packages: { 'node_modules/zod': { version: '3.23.8' } },
+}), 'utf8').toString('base64');
 
 function jsonResponse(body: unknown, init?: ResponseInit): Response {
   return new Response(JSON.stringify(body), {
@@ -23,7 +29,7 @@ function jsonResponse(body: unknown, init?: ResponseInit): Response {
   });
 }
 
-function successfulFetch() {
+function successfulFetch(targetVersion = '4.1.5') {
   return vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
     if (url === 'https://api.github.com/repos/sample/toolbox') {
@@ -45,10 +51,20 @@ function successfulFetch() {
         content: manifestContent,
       });
     }
-    if (url === 'https://registry.npmjs.org/zod/4.1.5') {
+    if (url.includes('/contents/package-lock.json')) {
+      return jsonResponse({
+        type: 'file',
+        path: 'package-lock.json',
+        sha: 'lock123',
+        size: 128,
+        encoding: 'base64',
+        content: packageLockContent,
+      });
+    }
+    if (url === `https://registry.npmjs.org/zod/${targetVersion}`) {
       return jsonResponse({
         name: 'zod',
-        version: '4.1.5',
+        version: targetVersion,
         description: 'TypeScript-first schema validation',
         repository: { url: 'git+https://github.com/colinhacks/zod.git' },
         homepage: 'https://zod.dev',
@@ -106,6 +122,8 @@ describe('remote investigation', () => {
 
     expect(report.mode).toBe('remote-readonly');
     expect(report.repository).toBe('sample/toolbox');
+    expect(report.baseline).toMatchObject({ source: 'package-lock', version: '3.23.8' });
+    expect(report.decision).toMatchObject({ status: 'upgrade', manifestChangeRequired: true });
     expect(report.finding.risk).toBe('high');
     expect(report.source.manifestSha).toBe('abc123');
     expect(report.registry.repositoryUrl).toBe('https://github.com/colinhacks/zod');
@@ -115,6 +133,33 @@ describe('remote investigation', () => {
     expect(report.checks.find((check) => check.name === 'test')?.available).toBe(true);
     expect(report.results.every((result) => result.status === 'skipped')).toBe(true);
     expect(report.externalWritesAllowed).toBe(false);
+  });
+
+  it('reads exact versions from npm and Bun lockfiles', () => {
+    expect(versionFromPackageLock({
+      packages: { 'node_modules/typescript': { version: '5.9.3' } },
+    }, 'typescript')).toBe('5.9.3');
+    expect(versionFromBunLock(`{
+      "packages": {
+        "typescript": ["typescript@5.8.3", "https://registry.example/typescript.tgz", {}],
+      },
+    }`, 'typescript')).toBe('5.8.3');
+  });
+
+  it('reports a no-op when the lockfile already resolves the target', async () => {
+    const report = await investigateRemote({
+      repositoryUrl: 'https://github.com/sample/toolbox',
+      packageName: 'zod',
+      targetVersion: '3.23.8',
+    }, successfulFetch('3.23.8'));
+
+    expect(report.finding.currentVersion).toBe('3.23.8');
+    expect(report.decision).toEqual({
+      status: 'already-installed',
+      targetSatisfiesDeclaredRange: true,
+      manifestChangeRequired: false,
+      message: '3.23.8 is already resolved in the repository. No dependency upgrade is required.',
+    });
   });
 
   it('returns a specific error for inaccessible repositories', async () => {

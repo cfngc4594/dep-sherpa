@@ -21,7 +21,7 @@ No GitHub write access is implemented in this version. The web workspace clearly
 
 The web workspace has two deliberately separate paths:
 
-- **Live read-only evidence** accepts a public GitHub repository URL, a `package.json` path, an npm dependency, and an exact target version. It reads the manifest through the GitHub API, confirms the target through npm, matches up to six GitHub Releases from the package's declared source repository, discovers repository checks, and produces a copyable JSON report.
+- **Live read-only evidence** accepts a public GitHub repository URL, a `package.json` path, an npm dependency, and an exact target version. It reads the manifest plus a committed `package-lock.json` or text `bun.lock`, reports the exact resolved baseline when available, confirms the target through npm, distinguishes real upgrades from no-op requests, matches up to six GitHub Releases from the package's declared source repository, discovers repository checks, and produces a copyable JSON report.
 - **Deterministic demo** replays the complete Zod migration story, including a simulated failure, bounded repair, verification, and local approval gate.
 
 The hosted path never clones a repository, installs packages, executes project scripts, changes source, or writes to GitHub. Private repositories are intentionally unsupported until an explicit authentication design is approved.
@@ -117,7 +117,7 @@ docs/ARCHITECTURE.md    system diagram and trust boundaries
 ## Current boundaries
 
 - npm-compatible JavaScript/TypeScript projects only.
-- Version classification uses semantic-version ranges; exotic protocols are reported as unknown.
+- Hosted version classification prefers exact `package-lock.json` and text `bun.lock` evidence. A manifest range is never presented as the installed version; unsupported or missing lockfiles are reported as unresolved.
 - The hosted inspector reads only public repositories and uses unauthenticated upstream APIs, so normal GitHub and npm rate limits apply.
 - Exact npm version verification, semver-range GitHub Release matching, isolated npm upgrades, and one compiler-attributed Zod migration repair are live. Repository changelog fallback and model-proposed general repairs remain future work.
 - No branch push, pull request creation, messaging, or other external write occurs.

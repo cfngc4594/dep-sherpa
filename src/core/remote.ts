@@ -1,10 +1,12 @@
-import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis';
+import { analyzeUpgrade, inferPackageManager, listChecks, locateDependency } from './analysis';
 import semver from 'semver';
 import type {
   PackageManifest,
   ReleaseEvidence,
   ReleaseNoteEvidence,
   RegistryEvidence,
+  RemoteBaselineEvidence,
+  RemoteChangeDecision,
   RemoteInvestigationReport,
   RepositoryEvidence,
 } from './types';
@@ -70,6 +72,11 @@ interface GitHubReleaseResponse {
   body?: string | null;
   draft?: boolean;
   prerelease?: boolean;
+}
+
+interface NpmPackageLock {
+  packages?: Record<string, { version?: string }>;
+  dependencies?: Record<string, { version?: string }>;
 }
 
 type FetchImplementation = typeof fetch;
@@ -142,6 +149,159 @@ function validateTargetVersion(value: string): string {
 function decodeBase64Utf8(value: string): string {
   const bytes = Uint8Array.from(atob(value.replace(/\s/g, '')), (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+function siblingPath(manifestPath: string, filename: string): string {
+  const lastSlash = manifestPath.lastIndexOf('/');
+  return lastSlash === -1 ? filename : `${manifestPath.slice(0, lastSlash)}/${filename}`;
+}
+
+export function versionFromPackageLock(lockfile: NpmPackageLock, packageName: string): string | null {
+  const packageEntry = lockfile.packages?.[`node_modules/${packageName}`]?.version;
+  const legacyEntry = lockfile.dependencies?.[packageName]?.version;
+  const version = packageEntry ?? legacyEntry;
+  return version && semver.valid(version) ? version : null;
+}
+
+export function versionFromBunLock(content: string, packageName: string): string | null {
+  const escapedName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = content.match(new RegExp(`^[\\t ]*"${escapedName}":\\s*\\["${escapedName}@([^"\\s]+)"`, 'm'));
+  return match?.[1] && semver.valid(match[1]) ? match[1] : null;
+}
+
+async function collectRemoteBaseline(
+  owner: string,
+  repo: string,
+  branch: string,
+  manifestPath: string,
+  packageName: string,
+  declaredRange: string,
+  fetchImpl: FetchImplementation,
+): Promise<RemoteBaselineEvidence> {
+  const lockfilePath = siblingPath(manifestPath, 'package-lock.json');
+  const contentPath = lockfilePath.split('/').map(encodeURIComponent).join('/');
+
+  try {
+    const { body: content } = await fetchJson<GitHubContentResponse>(
+      fetchImpl,
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${contentPath}?ref=${encodeURIComponent(branch)}`,
+      githubHeaders,
+      {
+        code: 'MANIFEST_NOT_FOUND',
+        message: `No ${lockfilePath} was found on the repository's default branch.`,
+      },
+    );
+    if (content.type === 'file' && content.encoding === 'base64' && content.content) {
+      try {
+        const lockfile = JSON.parse(decodeBase64Utf8(content.content)) as NpmPackageLock;
+        const version = versionFromPackageLock(lockfile, packageName);
+        if (version) {
+          return {
+            status: 'resolved',
+            version,
+            source: 'package-lock',
+            path: lockfilePath,
+            message: `${lockfilePath} resolves ${packageName} to ${version}.`,
+          };
+        }
+      } catch {
+        // Continue to other evidence when a committed lockfile is malformed.
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof RemoteInvestigationError) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+  }
+
+  const bunLockPath = siblingPath(manifestPath, 'bun.lock');
+  const bunContentPath = bunLockPath.split('/').map(encodeURIComponent).join('/');
+  try {
+    const { body: content } = await fetchJson<GitHubContentResponse>(
+      fetchImpl,
+      `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/contents/${bunContentPath}?ref=${encodeURIComponent(branch)}`,
+      githubHeaders,
+      {
+        code: 'MANIFEST_NOT_FOUND',
+        message: `No ${bunLockPath} was found on the repository's default branch.`,
+      },
+    );
+    if (content.type === 'file' && content.encoding === 'base64' && content.content) {
+      const version = versionFromBunLock(decodeBase64Utf8(content.content), packageName);
+      if (version) {
+        return {
+          status: 'resolved',
+          version,
+          source: 'bun-lock',
+          path: bunLockPath,
+          message: `${bunLockPath} resolves ${packageName} to ${version}.`,
+        };
+      }
+    }
+  } catch (error) {
+    if (!(error instanceof RemoteInvestigationError) || error.code !== 'MANIFEST_NOT_FOUND') throw error;
+  }
+
+  const exactVersion = semver.valid(declaredRange);
+  if (exactVersion) {
+    return {
+      status: 'resolved',
+      version: exactVersion,
+      source: 'manifest-exact',
+      path: manifestPath,
+      message: `${manifestPath} pins ${packageName} exactly to ${exactVersion}.`,
+    };
+  }
+
+  return {
+    status: 'range-only',
+    version: null,
+    source: 'manifest-range',
+    path: manifestPath,
+    message: `${manifestPath} declares ${declaredRange}, but no exact installed version was found.`,
+  };
+}
+
+function decideRemoteChange(
+  currentVersion: string | null,
+  declaredRange: string,
+  targetVersion: string,
+): RemoteChangeDecision {
+  const targetSatisfiesDeclaredRange = semver.satisfies(targetVersion, declaredRange);
+  const manifestChangeRequired = !targetSatisfiesDeclaredRange;
+
+  if (!currentVersion) {
+    return {
+      status: 'unresolved',
+      targetSatisfiesDeclaredRange,
+      manifestChangeRequired,
+      message: targetSatisfiesDeclaredRange
+        ? `The declared range already permits ${targetVersion}, but the installed version could not be verified.`
+        : `The declared range does not permit ${targetVersion}; the installed version could not be verified.`,
+    };
+  }
+  if (semver.eq(currentVersion, targetVersion)) {
+    return {
+      status: 'already-installed',
+      targetSatisfiesDeclaredRange,
+      manifestChangeRequired: false,
+      message: `${targetVersion} is already resolved in the repository. No dependency upgrade is required.`,
+    };
+  }
+  if (semver.gt(currentVersion, targetVersion)) {
+    return {
+      status: 'downgrade',
+      targetSatisfiesDeclaredRange,
+      manifestChangeRequired,
+      message: `The repository resolves ${currentVersion}; ${targetVersion} would be a downgrade.`,
+    };
+  }
+  return {
+    status: 'upgrade',
+    targetSatisfiesDeclaredRange,
+    manifestChangeRequired,
+    message: manifestChangeRequired
+      ? `Upgrade ${currentVersion} to ${targetVersion}; the declared range must also change.`
+      : `Upgrade the resolved version from ${currentVersion} to ${targetVersion}; the declared range already permits the target.`,
+  };
 }
 
 function cleanRepositoryUrl(repository: NpmVersionResponse['repository']): string | null {
@@ -396,9 +556,40 @@ export async function investigateRemote(
     );
   }
 
+  const located = locateDependency(manifest, packageName);
+  if (!located) {
+    throw new RemoteInvestigationError(`${packageName} is not declared in package.json`, 'INVALID_INPUT', 422);
+  }
+
+  const baseline = await collectRemoteBaseline(
+    owner,
+    repo,
+    repository.default_branch,
+    manifestPath,
+    packageName,
+    located.range,
+    fetchImpl,
+  );
+
   let finding;
   try {
-    finding = analyzeUpgrade(manifest, packageName, targetVersion);
+    const analysisManifest: PackageManifest = baseline.version
+      ? {
+        ...manifest,
+        [located.section]: {
+          ...manifest[located.section],
+          [packageName]: baseline.version,
+        },
+      }
+      : manifest;
+    finding = analyzeUpgrade(analysisManifest, packageName, targetVersion);
+    finding.declaredRange = located.range;
+    if (!baseline.version) {
+      finding.currentVersion = null;
+      finding.releaseType = null;
+      finding.risk = 'unknown';
+      finding.reasons = ['The installed version could not be resolved from public repository evidence.'];
+    }
   } catch (error) {
     throw new RemoteInvestigationError(
       error instanceof Error ? error.message : 'The dependency request could not be analyzed.',
@@ -415,7 +606,11 @@ export async function investigateRemote(
     );
   }
 
-  const checks = listChecks(manifest);
+  const decision = decideRemoteChange(baseline.version, located.range, finding.targetVersion);
+  const packageManager = baseline.source === 'bun-lock' ? 'bun' : inferPackageManager(manifest);
+  const checks = listChecks(packageManager === inferPackageManager(manifest)
+    ? manifest
+    : { ...manifest, packageManager: `${packageManager}@unknown` });
   const source: RepositoryEvidence = {
     owner,
     name: repository.name,
@@ -448,7 +643,7 @@ export async function investigateRemote(
     generatedAt: new Date().toISOString(),
     repository: repository.full_name ?? `${owner}/${repo}`,
     manifestPath,
-    packageManager: inferPackageManager(manifest),
+    packageManager,
     finding,
     checks,
     results: checks.map((check) => ({
@@ -465,5 +660,7 @@ export async function investigateRemote(
     source,
     registry,
     releases,
+    baseline,
+    decision,
   };
 }

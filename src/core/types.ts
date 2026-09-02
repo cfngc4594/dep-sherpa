@@ -93,11 +93,28 @@ export interface ReleaseEvidence {
   message: string;
 }
 
+export interface RemoteBaselineEvidence {
+  status: 'resolved' | 'range-only';
+  version: string | null;
+  source: 'package-lock' | 'bun-lock' | 'manifest-exact' | 'manifest-range';
+  path: string | null;
+  message: string;
+}
+
+export interface RemoteChangeDecision {
+  status: 'upgrade' | 'already-installed' | 'downgrade' | 'unresolved';
+  targetSatisfiesDeclaredRange: boolean;
+  manifestChangeRequired: boolean;
+  message: string;
+}
+
 export interface RemoteInvestigationReport extends InvestigationReport {
   mode: 'remote-readonly';
   source: RepositoryEvidence;
   registry: RegistryEvidence;
   releases: ReleaseEvidence;
+  baseline: RemoteBaselineEvidence;
+  decision: RemoteChangeDecision;
 }
 
 export type CheckComparisonState =

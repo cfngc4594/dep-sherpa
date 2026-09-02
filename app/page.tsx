@@ -99,7 +99,9 @@ export default function Home() {
     const availableChecks = remoteReport.checks.filter((check) => check.available).map((check) => check.name);
     return [
       ['MANIFEST', `${remoteReport.finding.packageName} is declared as ${remoteReport.finding.declaredRange} in ${humanizeSection(remoteReport.finding.section)}.`],
+      ['BASELINE', remoteReport.baseline.message],
       ['NPM', `${remoteReport.finding.targetVersion} exists; npm latest points to ${remoteReport.registry.latestVersion ?? 'an unreported version'}.`],
+      ['DECISION', remoteReport.decision.message],
       ['RELEASE', remoteReport.releases.message],
       ['SOURCE', `${remoteReport.source.manifestPath} at ${remoteReport.source.manifestSha.slice(0, 7)} on ${remoteReport.source.defaultBranch}.`],
       ['CHECKS', availableChecks.length ? `Discovered ${availableChecks.join(', ')} scripts for the local runner.` : 'No standard verification scripts were declared.'],
@@ -110,13 +112,15 @@ export default function Home() {
   const stageItems = useMemo(() => {
     if (!remoteReport) return baseStages;
     const availableChecks = remoteReport.checks.filter((check) => check.available).length;
+    const noUpgrade = remoteReport.decision.status === 'already-installed';
+    const localUpgradeAvailable = remoteReport.decision.status === 'upgrade' && remoteReport.packageManager === 'npm';
     return [
-      { ...baseStages[0], detail: `${remoteReport.packageManager} · ${remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
+      { ...baseStages[0], detail: `${remoteReport.packageManager} · ${remoteReport.baseline.path ?? remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
       { ...baseStages[1], detail: remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} matching GitHub release notes retained` : 'npm confirmed · release notes not found' },
-      { ...baseStages[2], detail: 'Available through the local npm runner' },
-      { ...baseStages[3], detail: 'Local CLI compares baseline and candidate' },
-      { ...baseStages[4], detail: 'Opt-in · at most 3 source files and 12 lines' },
-      { ...baseStages[5], detail: `${availableChecks} checks discovered · not executed` },
+      { ...baseStages[2], detail: noUpgrade ? 'Not required · target already resolved' : localUpgradeAvailable ? 'Available through the local npm runner' : `${remoteReport.packageManager} execution is not supported yet` },
+      { ...baseStages[3], detail: noUpgrade ? 'No changed candidate to diagnose' : localUpgradeAvailable ? 'Local CLI compares baseline and candidate' : 'Awaiting a supported isolated runner' },
+      { ...baseStages[4], detail: noUpgrade ? 'No source repair proposed' : localUpgradeAvailable ? 'Opt-in · at most 3 source files and 12 lines' : 'No repair proposed without execution' },
+      { ...baseStages[5], detail: `${availableChecks} checks discovered · ${noUpgrade ? 'optional' : 'not executed'}` },
     ];
   }, [remoteReport]);
 
@@ -199,12 +203,14 @@ export default function Home() {
   };
 
   const finding = remoteReport?.finding;
+  const isNoUpgrade = remoteReport?.decision.status === 'already-installed';
+  const canRunLocalUpgrade = remoteReport?.decision.status === 'upgrade' && remoteReport.packageManager === 'npm';
   const displayPackage = finding?.packageName ?? 'zod';
-  const displayCurrent = finding?.currentVersion ?? (isRemote ? 'unknown' : '3.23.8');
+  const displayCurrent = remoteReport?.baseline.version ?? (isRemote ? 'unresolved' : '3.23.8');
   const displayTarget = finding?.targetVersion ?? '4.1.5';
   const displayedEvidence = isRemote ? remoteEvidence : syntheticEvidence;
   const completedStages = isRemote ? 2 : Math.max(0, Math.min(step, baseStages.length));
-  const cliCommand = remoteReport
+  const cliCommand = remoteReport && canRunLocalUpgrade
     ? `npm run depsherpa -- upgrade /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion} --attempt-repair`
     : '';
 
@@ -213,7 +219,11 @@ export default function Home() {
     : inspectorState === 'error'
       ? inspectorError
       : isRemote
-        ? 'Remote evidence is ready. Local execution is still required.'
+        ? isNoUpgrade
+          ? 'The target version is already resolved. No dependency upgrade is required.'
+          : canRunLocalUpgrade
+            ? 'Remote evidence is ready. Local execution is still required.'
+            : `Remote evidence is ready. The ${remoteReport.packageManager} local runner is not available yet.`
         : runState === 'running' && step >= 0
           ? `Investigation stage ${step + 1} of ${baseStages.length}: ${baseStages[step]?.label}`
           : runState === 'ready'
@@ -276,12 +286,12 @@ export default function Home() {
         <div className="case-heading">
           <div>
             <p className="repo-path"><CodeXml size={14} /> {isRemote ? `${remoteReport.source.owner} / ${remoteReport.source.name}` : 'acme / checkout-ui'} <span>{isRemote ? 'PUBLIC SOURCE' : 'SYNTHETIC'}</span></p>
-            <h1>{isRemote ? `Investigate ${displayPackage}@${displayTarget} before you install it.` : 'Investigate Zod 4 before it lands.'}</h1>
-            <p className="case-summary">{isRemote ? `Manifest and registry evidence classify this as a ${finding?.releaseType ?? 'non-standard'} change with ${finding?.risk ?? 'unknown'} risk. Repository execution remains local-only.` : 'One breaking change, one isolated repair, and a decision that still belongs to you.'}</p>
+            <h1>{isRemote ? isNoUpgrade ? `${displayPackage}@${displayTarget} is already installed.` : `Investigate ${displayPackage}@${displayTarget} before you install it.` : 'Investigate Zod 4 before it lands.'}</h1>
+            <p className="case-summary">{isRemote ? isNoUpgrade ? `${remoteReport.decision.message} Local checks remain optional.` : `${remoteReport.decision.message} Risk is ${finding?.risk ?? 'unknown'}; repository execution remains local-only.` : 'One breaking change, one isolated repair, and a decision that still belongs to you.'}</p>
           </div>
           <div className={`decision-state ${isRemote ? 'decision-state--remote' : `decision-state--${runState}`}`} aria-live="polite">
             {runState === 'approved' && !isRemote ? <CircleCheck size={18} /> : isRemote ? <BookOpenText size={18} /> : <Clock3 size={18} />}
-            <span>{isRemote ? 'Evidence ready · execution pending' : runState === 'approved' ? 'Approved locally' : finished ? 'Awaiting approval' : runState === 'running' ? 'Investigation running' : 'Not investigated'}</span>
+            <span>{isRemote ? isNoUpgrade ? 'No upgrade required' : 'Evidence ready · execution pending' : runState === 'approved' ? 'Approved locally' : finished ? 'Awaiting approval' : runState === 'running' ? 'Investigation running' : 'Not investigated'}</span>
           </div>
         </div>
 
@@ -290,7 +300,7 @@ export default function Home() {
             <div className="sheet-binding" aria-hidden="true"><span /><span /><span /></div>
             <div className="sheet-header">
               <div className="package-title"><span className="package-monogram">{packageInitial(displayPackage)}</span><div><p>PACKAGE UNDER REVIEW</p><h2>{displayPackage}</h2></div></div>
-              <div className="version-jump" aria-label={`Version change from ${displayCurrent} to ${displayTarget}`}><span>{displayCurrent}</span><ArrowRight size={18} /><strong>{displayTarget}</strong></div>
+              <div className="version-jump" aria-label={isNoUpgrade ? `Installed version ${displayCurrent} already matches the target` : `Version change from ${displayCurrent} to ${displayTarget}`}><span>{displayCurrent}</span>{isNoUpgrade ? <Check size={18} /> : <ArrowRight size={18} />}<strong>{displayTarget}</strong></div>
             </div>
 
             <div className="sheet-tabs" role="tablist" aria-label="Investigation views">
@@ -310,12 +320,12 @@ export default function Home() {
               {view === 'brief' && (
                 <div className="brief-view">
                   <div className="margin-note">{isRemote ? `SHA ${remoteReport.source.manifestSha.slice(0, 7).toUpperCase()}` : 'DS–0147'}<br />{new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date())}</div>
-                  <h3>{isRemote ? (finding?.releaseType === 'major' ? 'A major boundary deserves an isolated run.' : 'The manifest gives us the first risk signal.') : 'The version bump is small. The contract change is not.'}</h3>
-                  <p>{isRemote ? `${remoteReport.registry.description ?? displayPackage} DepSherpa confirmed the requested npm version and inspected the repository manifest. ${finding?.reasons.join(' ')}` : 'Zod 4 changes the error collection property used by the checkout validator. DepSherpa will reproduce the failure inside a temporary worktree, make only the documented API substitution, then rerun the repository’s own checks.'}</p>
+                  <h3>{isRemote ? isNoUpgrade ? 'The lockfile already matches the requested target.' : finding?.releaseType === 'major' ? 'A major boundary deserves an isolated run.' : 'Resolved dependency evidence gives us the first risk signal.' : 'The version bump is small. The contract change is not.'}</h3>
+                  <p>{isRemote ? `${remoteReport.registry.description ?? displayPackage} ${remoteReport.baseline.message} ${remoteReport.decision.message}` : 'Zod 4 changes the error collection property used by the checkout validator. DepSherpa will reproduce the failure inside a temporary worktree, make only the documented API substitution, then rerun the repository’s own checks.'}</p>
                   <dl className="risk-ledger">
                     <div><dt>Surface</dt><dd>{isRemote ? humanizeSection(finding!.section) : '1 call site'}</dd></div>
                     <div><dt>Package manager</dt><dd>{isRemote ? remoteReport.packageManager : 'pnpm'}</dd></div>
-                    <div><dt>{isRemote ? 'Default branch' : 'Network'}</dt><dd>{isRemote ? remoteReport.source.defaultBranch : 'read evidence only'}</dd></div>
+                    <div><dt>{isRemote ? 'Version source' : 'Network'}</dt><dd>{isRemote ? remoteReport.baseline.source.replace('-', ' ') : 'read evidence only'}</dd></div>
                     <div><dt>External writes</dt><dd>blocked</dd></div>
                   </dl>
                   <div className="proof-note">
@@ -365,7 +375,23 @@ export default function Home() {
                 </div>
               )}
 
-              {view === 'patch' && (isRemote ? (
+              {view === 'patch' && (isRemote ? (isNoUpgrade ? (
+                <div className="handoff-view">
+                  <div className="patch-heading"><div><p>NO-OP CONCLUSION</p><h3>No dependency change is required.</h3></div><CircleCheck size={24} /></div>
+                  <p>{remoteReport.baseline.message} DepSherpa will not generate an upgrade command or source repair for an unchanged dependency. The discovered project checks may still be run locally as an optional health check.</p>
+                  <div className="check-roster" aria-label="Optional project checks">
+                    {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
+                  </div>
+                </div>
+              ) : !canRunLocalUpgrade ? (
+                <div className="handoff-view">
+                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>Evidence is ready; automated execution is unavailable.</h3></div><TriangleAlert size={24} /></div>
+                  <p>{remoteReport.decision.message} {remoteReport.packageManager === 'npm' ? 'Resolve the installed baseline before running an isolated change.' : `The current isolated runner supports npm repositories; this repository uses ${remoteReport.packageManager}. No misleading command or repair proposal was generated.`}</p>
+                  <div className="check-roster" aria-label="Discovered project checks">
+                    {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
+                  </div>
+                </div>
+              ) : (
                 <div className="handoff-view">
                   <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>Repair stays opt-in and review-only.</h3></div><ShieldCheck size={24} /></div>
                   <p>Run this only inside a checkout whose scripts you trust. DepSherpa copies committed Git state, blocks install scripts, compares checks, and may repair compiler-attributed Zod migration failures under a three-source-file, twelve-line limit. The source repository remains untouched.</p>
@@ -374,7 +400,7 @@ export default function Home() {
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
                   </div>
                 </div>
-              ) : (
+              )) : (
                 <div className="patch-view">
                   <div className="patch-heading"><div><p>src/lib/validation.ts</p><h3>One bounded repair</h3></div><span className="diff-count">+1 −1</span></div>
                   <pre aria-label="Proposed source patch"><code><span className="diff-context">{'  if (error instanceof ZodError) {'}</span>{'\n'}<span className="diff-remove">-   return error.errors.map(formatIssue);</span>{'\n'}<span className="diff-add">+   return error.issues.map(formatIssue);</span>{'\n'}<span className="diff-context">{'  }'}</span></code></pre>
@@ -384,7 +410,7 @@ export default function Home() {
             </div>
 
             <footer className="sheet-footer">
-              <div className="agent-note"><SquareTerminal size={17} /><span>{isRemote ? 'Remote evidence intake' : 'Strands orchestration'}</span><small>{isRemote ? 'GitHub + npm · no execution' : 'credential-free replay'}</small></div>
+              <div className="agent-note"><SquareTerminal size={17} /><span>{isRemote ? 'Remote evidence intake' : 'Strands orchestration'}</span><small>{isRemote ? 'GitHub + registry · no execution' : 'credential-free replay'}</small></div>
               <div className="sheet-actions">
                 {isRemote ? <><button className="reset-button" type="button" onClick={resetDemo}><RotateCcw size={15} /> Use demo</button><button className="primary-button" type="button" onClick={() => copyText(JSON.stringify(remoteReport, null, 2), 'Evidence report copied as JSON.')}><Copy size={16} /> Copy report</button></> : <>
                   {runState !== 'idle' && <button className="reset-button" onClick={resetDemo} disabled={runState === 'running'}><RotateCcw size={15} /> Reset</button>}
