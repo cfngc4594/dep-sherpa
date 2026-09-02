@@ -456,7 +456,7 @@ export default function Home() {
             <div className="sheet-body" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`} tabIndex={0}>
               {view === 'brief' && (
                 <div className="brief-view">
-                  <div className="margin-note">{isRemote ? `SHA ${remoteReport.source.manifestSha.slice(0, 7).toUpperCase()}` : 'DS–0147'}<br />{new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date())}</div>
+                  <div className="margin-note">{isRemote ? `SHA ${remoteReport.source.manifestSha.slice(0, 7).toUpperCase()}` : 'DS–0147'}<br />{new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date())}</div>
                   <h3>{isRemote ? isNoUpgrade ? 'The lockfile already matches the requested target.' : finding?.releaseType === 'major' ? 'A major boundary deserves an isolated run.' : 'Resolved dependency evidence gives us the first risk signal.' : 'The version bump is small. The contract change is not.'}</h3>
                   <p>{isRemote ? `${remoteReport.registry.description ?? displayPackage} ${remoteReport.baseline.message} ${remoteReport.decision.message}` : 'Zod 4 changes the error collection property used by the checkout validator. DepSherpa will reproduce the failure inside a temporary worktree, make only the documented API substitution, then rerun the repository’s own checks.'}</p>
                   <dl className="risk-ledger">
