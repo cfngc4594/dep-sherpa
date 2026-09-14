@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import type { CommandResult, ProjectCheck } from './types';
+import type { CommandResult, ProjectCheck } from './types.js';
 
 const MAX_OUTPUT = 12_000;
 
@@ -15,7 +15,7 @@ export interface CommandSpec {
 
 function displayCommand(executable: string, args: string[]): string {
   return [executable, ...args]
-    .map((part) => /^[A-Za-z0-9_./@:=+-]+$/.test(part) ? part : JSON.stringify(part))
+    .map((part) => (/^[A-Za-z0-9_./@:=+-]+$/.test(part) ? part : JSON.stringify(part)))
     .join(' ');
 }
 
@@ -91,11 +91,7 @@ export async function runCommand(spec: CommandSpec): Promise<CommandResult> {
   });
 }
 
-export async function runCheck(
-  check: ProjectCheck,
-  cwd: string,
-  timeoutMs = 120_000,
-): Promise<CommandResult> {
+export async function runCheck(check: ProjectCheck, cwd: string, timeoutMs = 120_000): Promise<CommandResult> {
   if (!check.available) {
     return {
       name: check.name,
@@ -118,11 +114,7 @@ export async function runCheck(
   });
 }
 
-export async function runChecks(
-  checks: ProjectCheck[],
-  cwd: string,
-  timeoutMs?: number,
-): Promise<CommandResult[]> {
+export async function runChecks(checks: ProjectCheck[], cwd: string, timeoutMs?: number): Promise<CommandResult[]> {
   const results: CommandResult[] = [];
   for (const check of checks) results.push(await runCheck(check, cwd, timeoutMs));
   return results;

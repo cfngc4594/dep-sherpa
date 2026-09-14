@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { runCommand } from '../core/runner';
+import { runCommand } from '../core/runner.js';
 
 /**
  * Prepares the repository state the isolated runner should treat as "source".
@@ -18,7 +18,13 @@ async function git(args: string[], cwd: string, timeoutMs = 120_000): Promise<st
 }
 
 async function commitExists(workspace: string, sha: string): Promise<boolean> {
-  const result = await runCommand({ name: 'git_cat_file', executable: 'git', args: ['cat-file', '-e', `${sha}^{commit}`], cwd: workspace, timeoutMs: 30_000 });
+  const result = await runCommand({
+    name: 'git_cat_file',
+    executable: 'git',
+    args: ['cat-file', '-e', `${sha}^{commit}`],
+    cwd: workspace,
+    timeoutMs: 30_000,
+  });
   return result.status === 'passed';
 }
 
@@ -37,20 +43,31 @@ export async function prepareSourceCheckout(options: {
   /** Commit to investigate from; defaults to the workspace HEAD. */
   sha?: string | null;
 }): Promise<SourceCheckout> {
-  const sha = options.sha ?? await git(['rev-parse', 'HEAD'], options.workspace);
+  const sha = options.sha ?? (await git(['rev-parse', 'HEAD'], options.workspace));
   if (!/^[0-9a-f]{40}$/i.test(sha)) throw new Error(`Refusing to check out a non-SHA revision: ${sha}`);
   if (!(await commitExists(options.workspace, sha))) {
     // Shallow checkouts do not contain the base commit; fetch just that commit through the workspace's own remote.
     await git(['fetch', '--no-tags', '--depth=1', 'origin', sha], options.workspace, 300_000);
-    if (!(await commitExists(options.workspace, sha))) throw new Error(`Commit ${sha} is not available in the workspace even after fetching it.`);
+    if (!(await commitExists(options.workspace, sha)))
+      throw new Error(`Commit ${sha} is not available in the workspace even after fetching it.`);
   }
   const branch = `depsherpa/source-${sha.slice(0, 12)}`;
   const target = path.join(options.temporaryRoot, 'source');
   await git(['branch', '-f', branch, sha], options.workspace);
   try {
-    await git(['clone', '--quiet', '--no-hardlinks', '--branch', branch, '--single-branch', options.workspace, target], options.temporaryRoot, 300_000);
+    await git(
+      ['clone', '--quiet', '--no-hardlinks', '--branch', branch, '--single-branch', options.workspace, target],
+      options.temporaryRoot,
+      300_000,
+    );
   } finally {
-    await runCommand({ name: 'git_branch_cleanup', executable: 'git', args: ['branch', '-D', branch], cwd: options.workspace, timeoutMs: 30_000 });
+    await runCommand({
+      name: 'git_branch_cleanup',
+      executable: 'git',
+      args: ['branch', '-D', branch],
+      cwd: options.workspace,
+      timeoutMs: 30_000,
+    });
   }
   const checkedOut = await git(['rev-parse', 'HEAD'], target);
   if (checkedOut !== sha) throw new Error(`The source checkout is at ${checkedOut}, expected ${sha}.`);

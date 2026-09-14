@@ -1,4 +1,4 @@
-import OpenAI, { APIError } from 'openai';
+import { APIError, OpenAI } from 'openai';
 import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 import { z } from 'zod';
 import type {
@@ -6,7 +6,7 @@ import type {
   RepairProposal,
   RepairProposalGeneration,
   RepairProposalGenerator,
-} from '../core/types';
+} from '../core/types.js';
 
 /**
  * Model-backed repair proposals over any OpenAI-compatible chat/completions
@@ -41,11 +41,17 @@ export function resolveModelConfig(env: Record<string, string | undefined> = pro
   const baseURL = env.OPENAI_BASE_URL?.trim() || undefined;
   if (apiKey || baseURL) {
     // Some self-hosted OpenAI-compatible servers accept any key; the SDK still requires one.
-    return { provider: 'openai-compatible', baseURL, apiKey: apiKey ?? 'no-key-required', model: model ?? defaultOpenAIModel };
+    return {
+      provider: 'openai-compatible',
+      baseURL,
+      apiKey: apiKey ?? 'no-key-required',
+      model: model ?? defaultOpenAIModel,
+    };
   }
   return {
     provider: 'none',
-    reason: 'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL and DEPSHERPA_MODEL) to enable model proposals; recipes run without one.',
+    reason:
+      'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL and DEPSHERPA_MODEL) to enable model proposals; recipes run without one.',
   };
 }
 
@@ -141,7 +147,10 @@ export interface OpenAIGeneratorOptions {
   timeoutMs?: number;
 }
 
-export function createOpenAIProposalGenerator(config: ModelConfig, options: OpenAIGeneratorOptions = {}): RepairProposalGenerator {
+export function createOpenAIProposalGenerator(
+  config: ModelConfig,
+  options: OpenAIGeneratorOptions = {},
+): RepairProposalGenerator {
   return async (context: RepairInvestigationContext): Promise<RepairProposalGeneration> => {
     if (config.provider === 'none') return { status: 'unavailable', reason: config.reason };
     const client = new OpenAI({
@@ -161,9 +170,13 @@ export function createOpenAIProposalGenerator(config: ModelConfig, options: Open
         ],
       });
     } catch (error) {
-      return { status: 'unavailable', reason: `The model endpoint (${describeModelConfig(config)}) was unavailable (${boundedDetail(error)}).` };
+      return {
+        status: 'unavailable',
+        reason: `The model endpoint (${describeModelConfig(config)}) was unavailable (${boundedDetail(error)}).`,
+      };
     }
-    if (!content) return { status: 'unavailable', reason: `The model (${describeModelConfig(config)}) returned no content.` };
+    if (!content)
+      return { status: 'unavailable', reason: `The model (${describeModelConfig(config)}) returned no content.` };
     let parsed: unknown;
     try {
       parsed = JSON.parse(content);
@@ -172,17 +185,22 @@ export function createOpenAIProposalGenerator(config: ModelConfig, options: Open
     }
     const output = repairGenerationWireSchema.safeParse(parsed);
     if (!output.success) {
-      return { status: 'unavailable', reason: `The model (${describeModelConfig(config)}) did not return a machine-valid repair proposal.` };
+      return {
+        status: 'unavailable',
+        reason: `The model (${describeModelConfig(config)}) did not return a machine-valid repair proposal.`,
+      };
     }
     if (output.data.outcome === 'proposal' && output.data.proposal) {
       const proposal: RepairProposal = { kind: 'agent', ...output.data.proposal };
       return { status: 'generated', proposal };
     }
-    return { status: 'no_proposal', reason: output.data.reason?.trim() || 'The model declined to propose a repair from the supplied evidence.' };
+    return {
+      status: 'no_proposal',
+      reason: output.data.reason?.trim() || 'The model declined to propose a repair from the supplied evidence.',
+    };
   };
 }
 
 /** Default generator used by the CLI and the GitHub Action: configuration is read from the environment per call. */
-export const generateRepairProposal: RepairProposalGenerator = (context) => (
-  createOpenAIProposalGenerator(resolveModelConfig(process.env))(context)
-);
+export const generateRepairProposal: RepairProposalGenerator = (context) =>
+  createOpenAIProposalGenerator(resolveModelConfig(process.env))(context);

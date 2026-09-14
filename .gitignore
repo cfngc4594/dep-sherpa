@@ -1,20 +1,32 @@
-# dependencies
-/node_modules
+# Dependency directory
+node_modules
 
-# testing
-/coverage
-
-# misc
-.DS_Store
-*.pem
-
-# debug
+# Logs
+logs
+*.log
 npm-debug.log*
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# TypeScript cache
 *.tsbuildinfo
 
-# local environment
-.env*
-!.env.example
+# Optional eslint cache
+.eslintcache
 
-# report output produced by local runs of the Action entry point
+# dotenv environment variables file
+.env
+.env.test
+
+# Report output produced by local runs of the action
 /depsherpa-report/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# IDE files
+.idea
+*.code-workspace

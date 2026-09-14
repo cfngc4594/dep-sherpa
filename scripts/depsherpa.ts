@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-import { investigate } from '../src/core/investigate';
-import { renderIsolatedUpgradeReport, renderMarkdownReport } from '../src/core/report';
-import { upgradeInIsolation } from '../src/core/upgrade';
+import { investigate } from '../src/core/investigate.js';
+import { renderIsolatedUpgradeReport, renderMarkdownReport } from '../src/core/report.js';
+import { upgradeInIsolation } from '../src/core/upgrade.js';
 
 function usage(): never {
   console.error(`Usage:

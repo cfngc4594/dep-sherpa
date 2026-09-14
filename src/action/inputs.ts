@@ -1,17 +1,23 @@
 import semver from 'semver';
 
 /**
- * Inputs the GitHub Action accepts. `action.yml` maps each `with:` input to one
- * of these environment variables; nothing else is read from the workflow, so a
- * workflow cannot hand DepSherpa a command, a script name, or an executable.
+ * Inputs the GitHub Action accepts, read through `@actions/core`'s `getInput`.
+ * Nothing else is read from the workflow, so a workflow cannot hand DepSherpa a
+ * command, a script name, or an executable.
  */
 export interface ActionInputs {
   packageName: string | null;
   targetVersion: string | null;
   attemptRepair: boolean;
   comment: boolean;
+  uploadArtifact: boolean;
   /** Directory (relative to the workspace) that receives report.json, report.md, and candidate.patch. */
   outputDir: string;
+  /** Model settings; empty strings mean "not provided". */
+  model: string | null;
+  openaiBaseUrl: string | null;
+  openaiApiKey: string | null;
+  githubToken: string | null;
 }
 
 export type InputValidation = { ok: true; value: string } | { ok: false; message: string };
@@ -30,8 +36,14 @@ export function validatePackageName(value: string): InputValidation {
 /** Only an exact semantic version may reach the core; ranges and dist-tags are rejected. */
 export function validateTargetVersion(value: string): InputValidation {
   const targetVersion = value.trim();
-  const exact = targetVersion.length <= 64 && !/\s/.test(targetVersion) ? semver.valid(targetVersion, { loose: false }) : null;
-  if (!exact) return { ok: false, message: 'version must be an exact semantic version such as 4.1.5; ranges and dist-tags are not accepted.' };
+  const exact =
+    targetVersion.length <= 64 && !/\s/.test(targetVersion) ? semver.valid(targetVersion, { loose: false }) : null;
+  if (!exact) {
+    return {
+      ok: false,
+      message: 'version must be an exact semantic version such as 4.1.5; ranges and dist-tags are not accepted.',
+    };
+  }
   return { ok: true, value: exact };
 }
 
@@ -49,16 +61,40 @@ function optionalText(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-export function readActionInputs(env: Record<string, string | undefined>): ActionInputs {
-  const outputDir = optionalText(env.DEPSHERPA_OUTPUT_DIR) ?? 'depsherpa-report';
-  if (outputDir.startsWith('/') || outputDir.split(/[\\/]/).includes('..')) {
-    throw new Error('DEPSHERPA_OUTPUT_DIR must be a relative path inside the workspace.');
+export type InputReader = (name: string) => string;
+
+export function readActionInputs(getInput: InputReader): ActionInputs {
+  const outputDir = optionalText(getInput('report-dir')) ?? 'depsherpa-report';
+  if (outputDir.startsWith('/') || /^[A-Za-z]:/.test(outputDir) || outputDir.split(/[\\/]/).includes('..')) {
+    throw new Error('report-dir must be a relative path inside the workspace.');
   }
   return {
-    packageName: optionalText(env.DEPSHERPA_PACKAGE),
-    targetVersion: optionalText(env.DEPSHERPA_TARGET_VERSION),
-    attemptRepair: parseBooleanInput(env.DEPSHERPA_ATTEMPT_REPAIR, true),
-    comment: parseBooleanInput(env.DEPSHERPA_COMMENT, true),
+    packageName: optionalText(getInput('package')),
+    targetVersion: optionalText(getInput('version')),
+    attemptRepair: parseBooleanInput(getInput('attempt-repair'), true),
+    comment: parseBooleanInput(getInput('comment'), true),
+    uploadArtifact: parseBooleanInput(getInput('upload-artifact'), true),
     outputDir,
+    model: optionalText(getInput('model')),
+    openaiBaseUrl: optionalText(getInput('openai-base-url')),
+    openaiApiKey: optionalText(getInput('openai-api-key')),
+    githubToken: optionalText(getInput('github-token')),
+  };
+}
+
+/**
+ * Environment handed to the model layer: workflow inputs win over ambient
+ * variables so a workflow can point at any OpenAI-compatible endpoint without
+ * touching the runner environment.
+ */
+export function modelEnvironment(
+  inputs: ActionInputs,
+  env: Record<string, string | undefined>,
+): Record<string, string | undefined> {
+  return {
+    ...env,
+    ...(inputs.openaiApiKey ? { OPENAI_API_KEY: inputs.openaiApiKey } : {}),
+    ...(inputs.openaiBaseUrl ? { OPENAI_BASE_URL: inputs.openaiBaseUrl } : {}),
+    ...(inputs.model ? { DEPSHERPA_MODEL: inputs.model } : {}),
   };
 }

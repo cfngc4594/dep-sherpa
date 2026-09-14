@@ -1,8 +1,4 @@
-export type DependencySection =
-  | 'dependencies'
-  | 'devDependencies'
-  | 'peerDependencies'
-  | 'optionalDependencies';
+export type DependencySection = 'dependencies' | 'devDependencies' | 'peerDependencies' | 'optionalDependencies';
 
 export type UpgradeRisk = 'low' | 'medium' | 'high' | 'unknown';
 
@@ -54,12 +50,7 @@ export interface InvestigationReport {
   externalWritesAllowed: false;
 }
 
-export type CheckComparisonState =
-  | 'passed'
-  | 'introduced_failure'
-  | 'pre_existing_failure'
-  | 'resolved'
-  | 'not_run';
+export type CheckComparisonState = 'passed' | 'introduced_failure' | 'pre_existing_failure' | 'resolved' | 'not_run';
 
 export interface CheckComparison {
   name: string;
@@ -123,9 +114,7 @@ export type RepairProposalGeneration =
   | { status: 'no_proposal'; reason: string }
   | { status: 'unavailable'; reason: string };
 
-export type RepairProposalGenerator = (
-  context: RepairInvestigationContext,
-) => Promise<RepairProposalGeneration>;
+export type RepairProposalGenerator = (context: RepairInvestigationContext) => Promise<RepairProposalGeneration>;
 
 export interface RepairAttempt {
   requested: boolean;

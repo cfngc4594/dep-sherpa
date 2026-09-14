@@ -1,11 +1,5 @@
 import semver from 'semver';
-import type {
-  DependencyFinding,
-  DependencySection,
-  PackageManifest,
-  ProjectCheck,
-  UpgradeRisk,
-} from './types';
+import type { DependencyFinding, DependencySection, PackageManifest, ProjectCheck, UpgradeRisk } from './types.js';
 
 const dependencySections: DependencySection[] = [
   'dependencies',

@@ -2,11 +2,11 @@ import { access, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import semver from 'semver';
-import { generateRepairProposal } from '../agent/openai';
-import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis';
-import { readManifest } from './manifest';
-import { attemptBoundedRepair, emptyRepairAttempt } from './repair';
-import { runChecks, runCommand } from './runner';
+import { generateRepairProposal } from '../agent/openai.js';
+import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis.js';
+import { readManifest } from './manifest.js';
+import { attemptBoundedRepair, emptyRepairAttempt } from './repair.js';
+import { runChecks, runCommand } from './runner.js';
 import type {
   CheckComparison,
   CheckComparisonState,
@@ -15,7 +15,7 @@ import type {
   IsolatedUpgradeReport,
   RepairProposalGenerator,
   RepairSuggestion,
-} from './types';
+} from './types.js';
 
 export interface IsolatedUpgradeOptions {
   repoPath: string;
@@ -33,11 +33,7 @@ async function commandOutput(executable: string, args: string[], cwd: string): P
   return result.output.trim();
 }
 
-export function buildNpmUpgradeArgs(
-  packageName: string,
-  targetVersion: string,
-  section: DependencySection,
-): string[] {
+export function buildNpmUpgradeArgs(packageName: string, targetVersion: string, section: DependencySection): string[] {
   const sectionFlag: Partial<Record<DependencySection, string>> = {
     devDependencies: '--save-dev',
     peerDependencies: '--save-peer',
@@ -54,10 +50,7 @@ export function buildNpmUpgradeArgs(
   ];
 }
 
-function comparisonState(
-  baseline: CommandResult['status'],
-  candidate: CommandResult['status'],
-): CheckComparisonState {
+function comparisonState(baseline: CommandResult['status'], candidate: CommandResult['status']): CheckComparisonState {
   if (baseline === 'skipped' || candidate === 'skipped') return 'not_run';
   const baselineFailed = baseline === 'failed' || baseline === 'timed_out';
   const candidateFailed = candidate === 'failed' || candidate === 'timed_out';
@@ -101,7 +94,8 @@ function suggestionFor(comparison: CheckComparison, candidate?: CommandResult): 
   const introduced = comparison.state === 'introduced_failure';
   const prefix = introduced ? 'The upgrade introduced' : 'The baseline already contained';
   const actions: Record<string, string> = {
-    typecheck: 'Start with the first compiler diagnostic, then compare the affected API with the retained release notes.',
+    typecheck:
+      'Start with the first compiler diagnostic, then compare the affected API with the retained release notes.',
     test: 'Open the first failing assertion and determine whether the expected contract changed at the target version.',
     lint: 'Inspect the first lint diagnostic and keep any repair limited to files touched by the dependency API change.',
     build: 'Trace the earliest build error; later bundler messages are often secondary symptoms.',
@@ -123,7 +117,8 @@ export function classifyVerdict(
 ): IsolatedUpgradeReport['verdict'] {
   if (preparation.status !== 'passed' || upgrade.status !== 'passed') return 'blocked';
   if (comparisons.some((comparison) => comparison.state === 'introduced_failure')) return 'needs_repair';
-  if (unexpectedChanges.length || comparisons.some((comparison) => comparison.state === 'pre_existing_failure')) return 'inconclusive';
+  if (unexpectedChanges.length || comparisons.some((comparison) => comparison.state === 'pre_existing_failure'))
+    return 'inconclusive';
   return 'ready_for_review';
 }
 
@@ -179,18 +174,23 @@ async function readBoundedPackageText(
 ): Promise<{ text: string; truncated: boolean }> {
   const filePath = path.resolve(packageRoot, filename);
   const relative = path.relative(packageRoot, filePath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Package evidence path escaped its root.');
+  if (relative.startsWith('..') || path.isAbsolute(relative))
+    throw new Error('Package evidence path escaped its root.');
   const metadata = await lstat(filePath);
   if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Package evidence is not a regular file.');
   const resolvedRoot = await realpath(packageRoot);
   const resolvedFile = await realpath(filePath);
   const resolvedRelative = path.relative(resolvedRoot, resolvedFile);
-  if (resolvedRelative.startsWith('..') || path.isAbsolute(resolvedRelative)) throw new Error('Package evidence resolves outside its root.');
+  if (resolvedRelative.startsWith('..') || path.isAbsolute(resolvedRelative))
+    throw new Error('Package evidence resolves outside its root.');
   const handle = await open(resolvedFile, 'r');
   try {
     const buffer = Buffer.alloc(maxBytes + 1);
     const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return { text: buffer.subarray(0, Math.min(bytesRead, maxBytes)).toString('utf8'), truncated: bytesRead > maxBytes };
+    return {
+      text: buffer.subarray(0, Math.min(bytesRead, maxBytes)).toString('utf8'),
+      truncated: bytesRead > maxBytes,
+    };
   } finally {
     await handle.close();
   }
@@ -202,23 +202,32 @@ export async function collectInstalledPackageEvidence(
   targetVersion: string,
 ): Promise<string[]> {
   const directory = packageDirectory(workspacePath, packageName);
-  if (!directory) return [`Requested exact target: ${packageName}@${targetVersion}. Package path was not safe to inspect.`];
+  if (!directory)
+    return [`Requested exact target: ${packageName}@${targetVersion}. Package path was not safe to inspect.`];
   const evidence = [`Requested exact target: ${packageName}@${targetVersion}.`];
   try {
     const manifestSource = await readBoundedPackageText(directory, 'package.json', 128_000);
     if (manifestSource.truncated) throw new Error('Installed package manifest exceeds the evidence limit.');
     const manifest = JSON.parse(manifestSource.text) as {
-      name?: unknown; version?: unknown; repository?: unknown; homepage?: unknown; engines?: unknown;
+      name?: unknown;
+      version?: unknown;
+      repository?: unknown;
+      homepage?: unknown;
+      engines?: unknown;
     };
     const fields = [
-      typeof manifest.name === 'string' && typeof manifest.version === 'string' ? `installed=${manifest.name}@${manifest.version}` : null,
+      typeof manifest.name === 'string' && typeof manifest.version === 'string'
+        ? `installed=${manifest.name}@${manifest.version}`
+        : null,
       repositoryLabel(manifest.repository) ? `repository=${repositoryLabel(manifest.repository)}` : null,
       typeof manifest.homepage === 'string' ? `homepage=${manifest.homepage}` : null,
       manifest.engines ? `engines=${JSON.stringify(manifest.engines)}` : null,
     ].filter((value): value is string => Boolean(value));
     evidence.push(`Installed package manifest: ${fields.join('; ') || 'no selected metadata fields were present'}.`);
   } catch {
-    evidence.push('The installed target package manifest could not be read; the exact npm request remains the available version evidence.');
+    evidence.push(
+      'The installed target package manifest could not be read; the exact npm request remains the available version evidence.',
+    );
   }
 
   for (const filename of ['MIGRATION.md', 'UPGRADING.md', 'CHANGELOG.md', 'HISTORY.md']) {
@@ -226,10 +235,22 @@ export async function collectInstalledPackageEvidence(
       const source = await readBoundedPackageText(directory, filename, 64_000);
       const lines = source.text.split('\n');
       const targetMajor = targetVersion.split('.')[0];
-      const index = lines.findIndex((line) => line.includes(targetVersion) || new RegExp(`(?:^|\\D)v?${targetMajor}(?:\\.0)?(?:\\D|$)`, 'i').test(line) || /migrat|breaking/i.test(line));
+      const index = lines.findIndex(
+        (line) =>
+          line.includes(targetVersion) ||
+          new RegExp(`(?:^|\\D)v?${targetMajor}(?:\\.0)?(?:\\D|$)`, 'i').test(line) ||
+          /migrat|breaking/i.test(line),
+      );
       const start = Math.max(0, index >= 0 ? index - 2 : 0);
-      const excerpt = lines.slice(start, start + 14).join('\n').trim().slice(0, 3_500);
-      if (excerpt) evidence.push(`${filename} excerpt from the installed ${packageName}@${targetVersion} package${source.truncated ? ' (source truncated to 64 KiB)' : ''} (untrusted release text):\n${excerpt}`);
+      const excerpt = lines
+        .slice(start, start + 14)
+        .join('\n')
+        .trim()
+        .slice(0, 3_500);
+      if (excerpt)
+        evidence.push(
+          `${filename} excerpt from the installed ${packageName}@${targetVersion} package${source.truncated ? ' (source truncated to 64 KiB)' : ''} (untrusted release text):\n${excerpt}`,
+        );
       break;
     } catch {
       // Published packages do not consistently include migration notes.
@@ -241,7 +262,10 @@ export async function collectInstalledPackageEvidence(
 async function workspaceStatus(workspacePath: string): Promise<string[]> {
   const status = await commandOutput('git', ['status', '--porcelain=v1', '--untracked-files=normal'], workspacePath);
   return status
-    ? status.split('\n').filter((entry) => entry && statusPath(entry) !== 'node_modules/').slice(0, 200)
+    ? status
+        .split('\n')
+        .filter((entry) => entry && statusPath(entry) !== 'node_modules/')
+        .slice(0, 200)
     : [];
 }
 
@@ -250,12 +274,10 @@ export function statusPath(entry: string): string {
   return value.includes(' -> ') ? value.split(' -> ').at(-1)! : value;
 }
 
-export async function upgradeInIsolation(
-  options: IsolatedUpgradeOptions,
-): Promise<IsolatedUpgradeReport> {
+export async function upgradeInIsolation(options: IsolatedUpgradeOptions): Promise<IsolatedUpgradeReport> {
   const sourcePath = await realpath(path.resolve(options.repoPath));
   const gitRoot = await commandOutput('git', ['rev-parse', '--show-toplevel'], sourcePath);
-  if (await realpath(gitRoot) !== sourcePath) {
+  if ((await realpath(gitRoot)) !== sourcePath) {
     throw new Error('The repository path must be the Git root for this first isolated-runner release.');
   }
 
@@ -283,16 +305,21 @@ export async function upgradeInIsolation(
       cwd: workspacePath,
       timeoutMs: 30_000,
     });
-    if (detachOrigin.status !== 'passed') throw new Error(detachOrigin.output || 'Could not detach the disposable clone from the source repository.');
+    if (detachOrigin.status !== 'passed')
+      throw new Error(detachOrigin.output || 'Could not detach the disposable clone from the source repository.');
 
     const { manifest, manifestPath } = await readManifest(workspacePath);
     const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion);
     if (finding.currentVersion && !semver.gt(finding.targetVersion, finding.currentVersion)) {
-      throw new Error(`The target ${finding.targetVersion} must be newer than the committed version ${finding.currentVersion}.`);
+      throw new Error(
+        `The target ${finding.targetVersion} must be newer than the committed version ${finding.currentVersion}.`,
+      );
     }
     const packageManager = inferPackageManager(manifest);
     if (packageManager !== 'npm') {
-      throw new Error(`The isolated runner currently supports npm repositories; this project declares ${packageManager}.`);
+      throw new Error(
+        `The isolated runner currently supports npm repositories; this project declares ${packageManager}.`,
+      );
     }
     const checks = listChecks(manifest);
     const hasLockfile = await exists(path.join(workspacePath, 'package-lock.json'));
@@ -308,71 +335,74 @@ export async function upgradeInIsolation(
       timeoutMs: options.timeoutMs ?? 180_000,
     });
 
-    const baselineResults = preparation.status === 'passed'
-      ? await runChecks(checks, workspacePath, options.timeoutMs)
-      : checks.map((check) => ({
-          name: check.name,
-          command: check.command,
-          status: 'skipped' as const,
-          exitCode: null,
-          durationMs: 0,
-          output: 'Dependency preparation failed, so the baseline check was not run.',
-        }));
-    const baselineSideEffects = preparation.status === 'passed'
-      ? await workspaceStatus(workspacePath)
-      : [];
+    const baselineResults =
+      preparation.status === 'passed'
+        ? await runChecks(checks, workspacePath, options.timeoutMs)
+        : checks.map((check) => ({
+            name: check.name,
+            command: check.command,
+            status: 'skipped' as const,
+            exitCode: null,
+            durationMs: 0,
+            output: 'Dependency preparation failed, so the baseline check was not run.',
+          }));
+    const baselineSideEffects = preparation.status === 'passed' ? await workspaceStatus(workspacePath) : [];
 
-    const upgrade = preparation.status === 'passed' && baselineSideEffects.length === 0
-      ? await runCommand({
-          name: 'apply_upgrade',
-          executable: 'npm',
-          args: buildNpmUpgradeArgs(options.packageName, finding.targetVersion, finding.section),
-          cwd: workspacePath,
-          timeoutMs: options.timeoutMs ?? 180_000,
-        })
-      : {
-          name: 'apply_upgrade',
-          command: `npm install ${options.packageName}@${finding.targetVersion}`,
-          status: 'skipped' as const,
-          exitCode: null,
-          durationMs: 0,
-          output: preparation.status !== 'passed'
-            ? 'Dependency preparation failed, so the upgrade was not attempted.'
-            : 'A baseline check changed the disposable checkout, so the upgrade was stopped before those side effects could be mistaken for upgrade work.',
-        };
+    const upgrade =
+      preparation.status === 'passed' && baselineSideEffects.length === 0
+        ? await runCommand({
+            name: 'apply_upgrade',
+            executable: 'npm',
+            args: buildNpmUpgradeArgs(options.packageName, finding.targetVersion, finding.section),
+            cwd: workspacePath,
+            timeoutMs: options.timeoutMs ?? 180_000,
+          })
+        : {
+            name: 'apply_upgrade',
+            command: `npm install ${options.packageName}@${finding.targetVersion}`,
+            status: 'skipped' as const,
+            exitCode: null,
+            durationMs: 0,
+            output:
+              preparation.status !== 'passed'
+                ? 'Dependency preparation failed, so the upgrade was not attempted.'
+                : 'A baseline check changed the disposable checkout, so the upgrade was stopped before those side effects could be mistaken for upgrade work.',
+          };
 
-    const { changedFiles, patch } = upgrade.status === 'passed'
-      ? await gitPatch(workspacePath)
-      : { changedFiles: [], patch: '' };
-    const candidateResults = upgrade.status === 'passed'
-      ? await runChecks(checks, workspacePath, options.timeoutMs)
-      : checks.map((check) => ({
-          name: check.name,
-          command: check.command,
-          status: 'skipped' as const,
-          exitCode: null,
-          durationMs: 0,
-          output: 'The upgrade was not applied, so the candidate check was not run.',
-        }));
-    const candidateManifest = upgrade.status === 'passed'
-      ? (await readManifest(workspacePath)).manifest
-      : manifest;
-    const workspaceChangesAfterChecks = upgrade.status === 'passed'
-      ? await workspaceStatus(workspacePath)
-      : baselineSideEffects;
+    const { changedFiles, patch } =
+      upgrade.status === 'passed' ? await gitPatch(workspacePath) : { changedFiles: [], patch: '' };
+    const candidateResults =
+      upgrade.status === 'passed'
+        ? await runChecks(checks, workspacePath, options.timeoutMs)
+        : checks.map((check) => ({
+            name: check.name,
+            command: check.command,
+            status: 'skipped' as const,
+            exitCode: null,
+            durationMs: 0,
+            output: 'The upgrade was not applied, so the candidate check was not run.',
+          }));
+    const candidateManifest = upgrade.status === 'passed' ? (await readManifest(workspacePath)).manifest : manifest;
+    const workspaceChangesAfterChecks =
+      upgrade.status === 'passed' ? await workspaceStatus(workspacePath) : baselineSideEffects;
     const expectedChangePaths = new Set(['package.json', 'package-lock.json', 'npm-shrinkwrap.json']);
     const unexpectedCandidateChanges = workspaceChangesAfterChecks.filter(
       (entry) => !expectedChangePaths.has(statusPath(entry)),
     );
     const comparisons = compareCheckResults(baselineResults, candidateResults);
-    const releaseEvidence = upgrade.status === 'passed'
-      ? await collectInstalledPackageEvidence(workspacePath, options.packageName, finding.targetVersion)
-      : [`Requested exact target: ${options.packageName}@${finding.targetVersion}; the upgrade did not complete, so installed-package evidence is unavailable.`];
+    const releaseEvidence =
+      upgrade.status === 'passed'
+        ? await collectInstalledPackageEvidence(workspacePath, options.packageName, finding.targetVersion)
+        : [
+            `Requested exact target: ${options.packageName}@${finding.targetVersion}; the upgrade did not complete, so installed-package evidence is unavailable.`,
+          ];
     const repairSuggestions = comparisons
-      .map((comparison) => suggestionFor(
-        comparison,
-        candidateResults.find((result) => result.name === comparison.name),
-      ))
+      .map((comparison) =>
+        suggestionFor(
+          comparison,
+          candidateResults.find((result) => result.name === comparison.name),
+        ),
+      )
       .filter((suggestion): suggestion is RepairSuggestion => suggestion !== null);
     const baseVerdict = classifyVerdict(preparation, upgrade, comparisons, unexpectedCandidateChanges);
     const hasPreExistingFailure = comparisons.some((comparison) => comparison.state === 'pre_existing_failure');

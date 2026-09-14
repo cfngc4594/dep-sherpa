@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import type { PackageManifest } from './types';
+import type { PackageManifest } from './types.js';
 
-export { analyzeUpgrade, inferPackageManager, listChecks, locateDependency } from './analysis';
+export { analyzeUpgrade, inferPackageManager, listChecks, locateDependency } from './analysis.js';
 
 export async function readManifest(repoPath: string): Promise<{
   manifest: PackageManifest;

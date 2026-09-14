@@ -3,9 +3,9 @@ import { cp, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderIsolatedUpgradeReport } from '../src/core/report';
-import { runCommand } from '../src/core/runner';
-import { upgradeInIsolation } from '../src/core/upgrade';
+import { renderIsolatedUpgradeReport } from '../src/core/report.js';
+import { runCommand } from '../src/core/runner.js';
+import { upgradeInIsolation } from '../src/core/upgrade.js';
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const fixturePath = path.join(projectRoot, 'fixtures', 'zod-repair-npm');
@@ -21,7 +21,16 @@ try {
   await cp(fixturePath, repositoryPath, { recursive: true });
   await requireCommand('git', ['init', '--quiet']);
   await requireCommand('git', ['add', '.']);
-  await requireCommand('git', ['-c', 'user.name=DepSherpa', '-c', 'user.email=local@depsherpa.invalid', 'commit', '--quiet', '-m', 'demo: zod 3 baseline']);
+  await requireCommand('git', [
+    '-c',
+    'user.name=DepSherpa',
+    '-c',
+    'user.email=local@depsherpa.invalid',
+    'commit',
+    '--quiet',
+    '-m',
+    'demo: zod 3 baseline',
+  ]);
 
   const report = await upgradeInIsolation({
     repoPath: repositoryPath,

@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { analyzeUpgrade, inferPackageManager, listChecks, readManifest } from './manifest';
-import { runChecks } from './runner';
-import type { InvestigationReport } from './types';
+import { analyzeUpgrade, inferPackageManager, listChecks, readManifest } from './manifest.js';
+import { runChecks } from './runner.js';
+import type { InvestigationReport } from './types.js';
 
 export interface InvestigationOptions {
   repoPath: string;

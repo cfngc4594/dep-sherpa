@@ -1,4 +1,4 @@
-import type { InvestigationReport, IsolatedUpgradeReport } from './types';
+import type { InvestigationReport, IsolatedUpgradeReport } from './types.js';
 
 export function renderMarkdownReport(report: InvestigationReport): string {
   const { finding } = report;
@@ -36,11 +36,16 @@ This report does not modify a repository, push a branch, or create a pull reques
 
 export function renderIsolatedUpgradeReport(report: IsolatedUpgradeReport): string {
   const comparisons = report.comparisons
-    .map((comparison) => `| ${comparison.name} | ${comparison.baseline} | ${comparison.candidate} | ${comparison.state} |`)
+    .map(
+      (comparison) => `| ${comparison.name} | ${comparison.baseline} | ${comparison.candidate} | ${comparison.state} |`,
+    )
     .join('\n');
   const suggestions = report.repairSuggestions.length
     ? report.repairSuggestions
-        .map((suggestion) => `- **${suggestion.check}:** ${suggestion.summary} ${suggestion.nextAction}\n  - First diagnostic: ${suggestion.evidence}`)
+        .map(
+          (suggestion) =>
+            `- **${suggestion.check}:** ${suggestion.summary} ${suggestion.nextAction}\n  - First diagnostic: ${suggestion.evidence}`,
+        )
         .join('\n')
     : '- No failing candidate check requires a repair suggestion.';
   const dirtySource = report.source.dirtyFilesIgnored.length
@@ -65,11 +70,18 @@ export function renderIsolatedUpgradeReport(report: IsolatedUpgradeReport): stri
     ? report.repair.releaseEvidence.map((item) => `- ${item}`).join('\n')
     : '- No package release or installed-version evidence was available to the proposal step.';
   const contextRead = report.repair.contextRead.length
-    ? report.repair.contextRead.map((context) => `### \`${context.path}:${context.startLine}-${context.endLine}\`
+    ? report.repair.contextRead
+        .map(
+          (context) => `### \`${context.path}:${context.startLine}-${context.endLine}\`
 
 Supporting diagnostic: ${context.diagnostic}
 
-${context.content.split('\n').map((line) => `    ${line}`).join('\n')}`).join('\n\n')
+${context.content
+  .split('\n')
+  .map((line) => `    ${line}`)
+  .join('\n')}`,
+        )
+        .join('\n\n')
     : 'No source excerpt was supplied to a proposal generator.';
   const proposal = report.repair.proposal
     ? `- Generator: **${report.repair.proposalSource === 'recipe' ? 'deterministic recipe' : 'model-generated candidate'}**

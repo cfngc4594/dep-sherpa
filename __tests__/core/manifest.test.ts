@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import { analyzeUpgrade, inferPackageManager, listChecks, locateDependency } from './manifest';
-import type { PackageManifest } from './types';
+import { describe, expect, it } from '@jest/globals';
+import { analyzeUpgrade, inferPackageManager, listChecks, locateDependency } from '../../src/core/manifest.js';
+import type { PackageManifest } from '../../src/core/types.js';
 
 const manifest: PackageManifest = {
   name: '@acme/checkout-ui',

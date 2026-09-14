@@ -47,7 +47,7 @@ npm run lint
 Then exercise the public paths:
 
 1. **GitHub Action**  
-   Add the workflow from the README to any npm repository and open a pull request that bumps one dependency in `package.json`; the PR receives the report comment and the run uploads the `depsherpa-report` artifact. Locally, `npm test -- --run src/action` runs the same orchestration against a shallow Dependabot-style checkout.
+   Add the workflow from the README to any npm repository and open a pull request that bumps one dependency in `package.json`; the PR receives the report comment and the run uploads the `depsherpa-report` artifact. Locally, `npm test -- __tests__/action` runs the same orchestration against a shallow Dependabot-style checkout.
 
 2. **Isolated upgrade + deterministic repair**  
    `npm run demo:repair`  

@@ -1,4 +1,4 @@
-import type { IsolatedUpgradeReport } from '../core/types';
+import type { IsolatedUpgradeReport } from '../core/types.js';
 
 /**
  * Compact pull-request comment. The complete Markdown report goes to the job
@@ -19,7 +19,9 @@ const verdictLabels: Record<IsolatedUpgradeReport['verdict'], string> = {
 };
 
 function truncate(text: string, limit: number): { text: string; truncated: boolean } {
-  return text.length > limit ? { text: `${text.slice(0, limit)}\n… (truncated)`, truncated: true } : { text, truncated: false };
+  return text.length > limit
+    ? { text: `${text.slice(0, limit)}\n… (truncated)`, truncated: true }
+    : { text, truncated: false };
 }
 
 function fence(content: string, language: string): string {
@@ -30,8 +32,10 @@ function fence(content: string, language: string): string {
 
 export function proposalSourceLabel(report: IsolatedUpgradeReport): string {
   const { repair } = report;
-  if (repair.proposalSource === 'recipe' || repair.proposal?.kind === 'recipe') return `recipe \`${repair.recipeId ?? repair.proposal?.id ?? 'unknown'}\``;
-  if (repair.proposalSource === 'agent' || repair.proposal?.kind === 'agent') return `model proposal \`${repair.proposal?.id ?? 'unknown'}\` (a suggestion, not a guarantee)`;
+  if (repair.proposalSource === 'recipe' || repair.proposal?.kind === 'recipe')
+    return `recipe \`${repair.recipeId ?? repair.proposal?.id ?? 'unknown'}\``;
+  if (repair.proposalSource === 'agent' || repair.proposal?.kind === 'agent')
+    return `model proposal \`${repair.proposal?.id ?? 'unknown'}\` (a suggestion, not a guarantee)`;
   return 'none';
 }
 
@@ -48,13 +52,20 @@ export function renderPullRequestComment(report: IsolatedUpgradeReport, links: {
 
   if (report.preparation.status !== 'passed' || report.upgrade.status !== 'passed') {
     const failed = report.preparation.status !== 'passed' ? report.preparation : report.upgrade;
-    lines.push(`**${failed.name}** ${failed.status} (\`${failed.command}\`)`, '', fence(truncate(failed.output, 2_000).text, 'text'), '');
+    lines.push(
+      `**${failed.name}** ${failed.status} (\`${failed.command}\`)`,
+      '',
+      fence(truncate(failed.output, 2_000).text, 'text'),
+      '',
+    );
   }
 
   if (report.comparisons.length) {
     lines.push('| Check | Baseline | Candidate | Classification |', '| --- | --- | --- | --- |');
     for (const comparison of report.comparisons) {
-      lines.push(`| ${comparison.name} | ${comparison.baseline} | ${comparison.candidate} | ${comparison.state.replace(/_/g, ' ')} |`);
+      lines.push(
+        `| ${comparison.name} | ${comparison.baseline} | ${comparison.candidate} | ${comparison.state.replace(/_/g, ' ')} |`,
+      );
     }
     lines.push('');
   }
@@ -72,12 +83,16 @@ export function renderPullRequestComment(report: IsolatedUpgradeReport, links: {
     : '**Repair:** not requested';
   lines.push(repairLine, '', `> ${repair.rationale}`, '');
   if (repair.proposalSource === 'agent' || repair.proposal?.kind === 'agent') {
-    lines.push('> The proposal came from a model. `verified` only means the observed checks passed inside the clone; it is not a correctness guarantee.', '');
+    lines.push(
+      '> The proposal came from a model. `verified` only means the observed checks passed inside the clone; it is not a correctness guarantee.',
+      '',
+    );
   }
 
   if (report.unexpectedCandidateChanges.length || repair.unexpectedChanges.length) {
     lines.push('**Unexpected changes**', '');
-    for (const entry of [...report.unexpectedCandidateChanges, ...repair.unexpectedChanges]) lines.push(`- \`${entry}\``);
+    for (const entry of [...report.unexpectedCandidateChanges, ...repair.unexpectedChanges])
+      lines.push(`- \`${entry}\``);
     lines.push('');
   }
 
@@ -95,19 +110,13 @@ export function renderPullRequestComment(report: IsolatedUpgradeReport, links: {
     lines.push('No tracked manifest, lockfile, or source change was produced.', '');
   }
 
-  const fullReport = links.runUrl ? `Full report: [job summary and artifact](${links.runUrl}).` : 'Full report: see the job summary and the `depsherpa-report` artifact.';
+  const fullReport = links.runUrl
+    ? `Full report: [job summary and artifact](${links.runUrl}).`
+    : 'Full report: see the job summary and the `depsherpa-report` artifact.';
   lines.push(`**Human decision required.** Reject, revise, or apply the reviewed patch yourself. ${fullReport}`);
 
   const body = lines.join('\n');
-  return body.length > commentHardLimit ? `${body.slice(0, commentHardLimit)}\n… (comment truncated; see the artifact)` : body;
-}
-
-/** GITHUB_OUTPUT heredoc format; safe for multi-line values. */
-export function formatOutputAssignments(entries: Record<string, string>): string {
-  return Object.entries(entries).map(([key, value]) => {
-    if (!/^[A-Za-z_][A-Za-z0-9_-]*$/.test(key)) throw new Error(`Invalid output name: ${key}`);
-    let delimiter = 'DEPSHERPA_EOF';
-    while (value.includes(delimiter)) delimiter = `${delimiter}_`;
-    return `${key}<<${delimiter}\n${value}\n${delimiter}\n`;
-  }).join('');
+  return body.length > commentHardLimit
+    ? `${body.slice(0, commentHardLimit)}\n… (comment truncated; see the artifact)`
+    : body;
 }

@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { runCommand } from './runner';
+import { describe, expect, it } from '@jest/globals';
+import { runCommand } from '../../src/core/runner.js';
 
 describe('bounded command runner', () => {
   it('executes argument arrays without a shell', async () => {

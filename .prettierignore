@@ -1,0 +1,7 @@
+dist/
+node_modules/
+coverage/
+fixtures/
+badges/
+package-lock.json
+*.md

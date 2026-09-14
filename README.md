@@ -119,29 +119,39 @@ The generic, non-recipe closed loop is covered by a test that injects a structur
 npm test -- --run src/core/repair.test.ts -t "validates, applies, and verifies a non-recipe Agent proposal"
 ```
 
-## Verification
+## Development
+
+The repository follows the [`actions/typescript-action`](https://github.com/actions/typescript-action) layout: a Node 24 action whose entry point is the committed bundle `dist/index.js`, built with Rollup from `src/index.ts`.
 
 ```bash
-npm run typecheck
-npm test
-npm run lint
+npm install
+npm run all          # format, lint, typecheck, test with coverage, badge, bundle
+npm run bundle       # format + rebuild dist/ (commit the result; check-dist.yml enforces it)
+npm run local-action # run src/main.ts locally with the INPUT_* values from .env (see .env.example)
 ```
 
-The suites cover the deterministic core (major/minor/patch/peer/dev/optional/missing/invalid cases and report invariants), the bounded repair policy, the OpenAI-compatible generator (strict schema, fallback, failure modes, configuration resolution), and the Action (input validation, PR detection, shallow-checkout base preparation, summary/outputs/artifact files, comment create/update). `npm run action` runs the Action entry point locally against the current directory when the GitHub environment variables are set.
+Individual steps: `npm run format:check`, `npm run lint`, `npm run typecheck`, `npm test` (Jest, ESM), `npm run package`.
+
+The suites cover the deterministic core (major/minor/patch/peer/dev/optional/missing/invalid cases and report invariants), the bounded repair policy, the OpenAI-compatible generator (strict schema, fallback, failure modes, configuration resolution), the Action orchestration (input validation, PR detection, shallow-checkout base preparation, summary/outputs/report files, comment create/update), and `src/main.ts` wiring against mocked `@actions/*` modules.
+
+Releases follow the template's tag convention: `script/release` creates `vX.Y.Z` and moves the major tag (`v1`) so workflows can pin `uses: cfngc4594/dep-sherpa@v1`.
 
 ## Repository map
 
 ```text
-action.yml                GitHub Action definition (composite)
-.github/workflows/        this repository's own DepSherpa workflow
-scripts/action.ts         Action entry point
-scripts/depsherpa.ts      command-line entry point
-scripts/demo-repair.ts    isolated Zod repair demonstration
-src/core/                 deterministic core: analysis, isolated runner, repair policy, reports
+action.yml                action metadata (runs: node24, main: dist/index.js)
+dist/                     bundled action (committed; rebuilt with npm run package)
+src/index.ts              entry point
+src/main.ts               @actions/core, @actions/github, @actions/artifact wiring
+src/action/               orchestration: inputs, PR detection, base checkout, comment
 src/agent/openai.ts       OpenAI-compatible proposal generator (no tools)
-src/action/               Action orchestration: inputs, PR detection, base checkout, comment
-src/evals/                deterministic evaluation scenarios
-fixtures/                 synthetic fixtures
+src/core/                 deterministic core: analysis, isolated runner, repair policy, reports
+__tests__/, __fixtures__/ Jest suites and shared fixtures
+scripts/depsherpa.ts      command-line entry point (same core)
+scripts/demo-repair.ts    isolated Zod repair demonstration
+script/release            tag and push a release
+.github/workflows/        ci, check-dist, codeql, and this repository's own DepSherpa run
+fixtures/                 synthetic repositories used by the demo and tests
 docs/                     architecture and Devpost copy
 ```
 

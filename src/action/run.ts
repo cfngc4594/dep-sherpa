@@ -1,35 +1,52 @@
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { createOpenAIProposalGenerator, describeModelConfig, resolveModelConfig } from '../agent/openai';
-import { renderIsolatedUpgradeReport } from '../core/report';
-import type { IsolatedUpgradeReport, PackageManifest } from '../core/types';
-import type { IsolatedUpgradeOptions } from '../core/upgrade';
-import { commentMarker, formatOutputAssignments, renderPullRequestComment } from './comment';
-import { readGitHubContext, type GitHubContext } from './context';
-import { detectDependencyChange } from './detect';
-import { upsertPullRequestComment } from './github';
-import { readActionInputs, validatePackageName, validateTargetVersion, type ActionInputs } from './inputs';
-import { prepareSourceCheckout } from './source';
+import { createOpenAIProposalGenerator, describeModelConfig, resolveModelConfig } from '../agent/openai.js';
+import { renderIsolatedUpgradeReport } from '../core/report.js';
+import type { IsolatedUpgradeReport, PackageManifest } from '../core/types.js';
+import type { IsolatedUpgradeOptions } from '../core/upgrade.js';
+import { renderPullRequestComment } from './comment.js';
+import type { GitHubContext } from './context.js';
+import { detectDependencyChange } from './detect.js';
+import { modelEnvironment, validatePackageName, validateTargetVersion, type ActionInputs } from './inputs.js';
+import type { prepareSourceCheckout } from './source.js';
 
 /**
  * Orchestrates one GitHub Action run: decide which upgrade to investigate, run
- * the CLI core in isolation, and publish the report as job summary, artifact
- * files, outputs, and (optionally) one pull-request comment. It never writes
- * to the repository, never commits, and never pushes.
+ * the CLI core in isolation, and publish the report through the injected
+ * sinks (job summary, outputs, report files, and at most one PR comment). It
+ * never writes to the repository, never commits, and never pushes.
  */
+
+export interface ActionRunInput {
+  inputs: ActionInputs;
+  context: GitHubContext;
+  env: Record<string, string | undefined>;
+}
 
 export interface ActionRunDependencies {
   upgrade: (options: IsolatedUpgradeOptions) => Promise<IsolatedUpgradeReport>;
   prepareSource: typeof prepareSourceCheckout;
-  fetchImpl: typeof fetch;
-  readEventFile?: (filePath: string) => Promise<string>;
+  /** Creates or updates the single PR comment; null when no pull request or token is available. */
+  publishComment: ((body: string) => Promise<'created' | 'updated'>) | null;
+  writeSummary: (markdown: string) => Promise<void>;
+  setOutput: (name: string, value: string) => void;
   log: (message: string) => void;
   warn: (message: string) => void;
 }
 
+export interface ReportFiles {
+  directory: string;
+  files: string[];
+}
+
 export type ActionOutcome =
-  | { status: 'completed'; report: IsolatedUpgradeReport; reportDir: string; comment: 'created' | 'updated' | 'skipped' | 'failed' }
+  | {
+      status: 'completed';
+      report: IsolatedUpgradeReport;
+      reportFiles: ReportFiles;
+      comment: 'created' | 'updated' | 'skipped' | 'failed';
+    }
   | { status: 'skipped'; reason: string };
 
 interface Target {
@@ -46,7 +63,11 @@ async function parseManifest(filePath: string): Promise<PackageManifest> {
 
 function targetFromInputs(inputs: ActionInputs): Target | null {
   if (!inputs.packageName && !inputs.targetVersion) return null;
-  if (!inputs.packageName || !inputs.targetVersion) throw new Error('Provide both `package` and `version` inputs, or neither to detect the change from a pull request.');
+  if (!inputs.packageName || !inputs.targetVersion) {
+    throw new Error(
+      'Provide both `package` and `version` inputs, or neither to detect the change from a pull request.',
+    );
+  }
   const packageName = validatePackageName(inputs.packageName);
   if (!packageName.ok) throw new Error(packageName.message);
   const targetVersion = validateTargetVersion(inputs.targetVersion);
@@ -54,48 +75,47 @@ function targetFromInputs(inputs: ActionInputs): Target | null {
   return { packageName: packageName.value, targetVersion: targetVersion.value, origin: 'inputs' };
 }
 
-async function appendSummary(env: Record<string, string | undefined>, markdown: string): Promise<void> {
-  if (!env.GITHUB_STEP_SUMMARY) return;
-  const bounded = markdown.length > summaryLimit ? `${markdown.slice(0, summaryLimit)}\n\n… (summary truncated; the complete report is in the artifact)\n` : markdown;
-  await appendFile(env.GITHUB_STEP_SUMMARY, `${bounded}\n`, 'utf8');
+function boundedSummary(markdown: string): string {
+  return markdown.length > summaryLimit
+    ? `${markdown.slice(0, summaryLimit)}\n\n… (summary truncated; the complete report is in the artifact)\n`
+    : markdown;
 }
 
-async function writeOutputs(env: Record<string, string | undefined>, entries: Record<string, string>): Promise<void> {
-  if (!env.GITHUB_OUTPUT) return;
-  await appendFile(env.GITHUB_OUTPUT, formatOutputAssignments(entries), 'utf8');
+async function skip(reason: string, detail: string, deps: ActionRunDependencies): Promise<ActionOutcome> {
+  await deps.writeSummary(`## DepSherpa\n\nNo isolated upgrade was run. ${detail}\n`);
+  deps.setOutput('verdict', 'skipped');
+  deps.setOutput('repair-status', 'not_run');
+  deps.setOutput('report-dir', '');
+  deps.log(`Skipped: ${reason}`);
+  return { status: 'skipped', reason };
 }
 
 async function publishComment(
-  context: GitHubContext,
-  env: Record<string, string | undefined>,
-  inputs: ActionInputs,
+  input: ActionRunInput,
   report: IsolatedUpgradeReport,
   deps: ActionRunDependencies,
 ): Promise<'created' | 'updated' | 'skipped' | 'failed'> {
-  const token = env.GITHUB_TOKEN?.trim();
-  if (!inputs.comment || !context.pullRequest || !context.repository || !token) return 'skipped';
+  if (!input.inputs.comment || !input.context.pullRequest || !deps.publishComment) return 'skipped';
   try {
-    const result = await upsertPullRequestComment(
-      { apiUrl: context.apiUrl, repository: context.repository, pullNumber: context.pullRequest.number, token },
-      renderPullRequestComment(report, { runUrl: context.runUrl }),
-      commentMarker,
-      deps.fetchImpl,
-    );
-    deps.log(`Pull request comment ${result.action} (#${context.pullRequest.number}).`);
-    return result.action;
+    const action = await deps.publishComment(renderPullRequestComment(report, { runUrl: input.context.runUrl }));
+    deps.log(`Pull request comment ${action} (#${input.context.pullRequest.number}).`);
+    return action;
   } catch (error) {
-    deps.warn(`Could not publish the pull request comment (the job summary and artifact still carry the report): ${error instanceof Error ? error.message : String(error)}`);
+    deps.warn(
+      `Could not publish the pull request comment (the job summary and artifact still carry the report): ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return 'failed';
   }
 }
 
-export async function runAction(env: Record<string, string | undefined>, deps: ActionRunDependencies): Promise<ActionOutcome> {
-  const inputs = readActionInputs(env);
-  const context = await readGitHubContext(env, deps.readEventFile);
+export async function runAction(input: ActionRunInput, deps: ActionRunDependencies): Promise<ActionOutcome> {
+  const { inputs, context } = input;
   const workspace = context.workspace ?? process.cwd();
   if (!path.isAbsolute(workspace)) throw new Error('GITHUB_WORKSPACE must be an absolute path.');
-  const reportDir = path.join(workspace, inputs.outputDir);
-  const modelConfig = resolveModelConfig(env);
+  const reportDirectory = path.join(workspace, inputs.outputDir);
+  const modelConfig = resolveModelConfig(modelEnvironment(inputs, input.env));
   deps.log(`Model for generic proposals: ${describeModelConfig(modelConfig)}.`);
 
   const temporaryRoot = await mkdtemp(path.join(tmpdir(), 'depsherpa-action-'));
@@ -108,28 +128,38 @@ export async function runAction(env: Record<string, string | undefined>, deps: A
       repoPath = source.path;
       deps.log(`Investigating from the pull request base ${source.sha.slice(0, 7)}.`);
       if (!target) {
-        const detection = detectDependencyChange(await parseManifest(path.join(source.path, 'package.json')), await parseManifest(path.join(workspace, 'package.json')));
+        const detection = detectDependencyChange(
+          await parseManifest(path.join(source.path, 'package.json')),
+          await parseManifest(path.join(workspace, 'package.json')),
+        );
         if (!detection.ok) {
-          const reason = detection.changes.length ? `${detection.reason}\n\nDetected changes:\n${detection.changes.map((change) => `- ${change}`).join('\n')}` : detection.reason;
-          await appendSummary(env, `## DepSherpa\n\nNo isolated upgrade was run. ${reason}\n`);
-          await writeOutputs(env, { verdict: 'skipped', 'repair-status': 'not_run', 'report-dir': '' });
-          deps.log(`Skipped: ${detection.reason}`);
-          return { status: 'skipped', reason: detection.reason };
+          const detail = detection.changes.length
+            ? `${detection.reason}\n\nDetected changes:\n${detection.changes.map((change) => `- ${change}`).join('\n')}`
+            : detection.reason;
+          return skip(detection.reason, detail, deps);
         }
-        target = { packageName: detection.change.packageName, targetVersion: detection.change.targetVersion, origin: 'pull_request' };
-        deps.log(`Detected ${detection.change.section}.${detection.change.packageName}: ${detection.change.fromRange} → ${detection.change.toRange} (exact target ${detection.change.targetVersion}).`);
+        target = {
+          packageName: detection.change.packageName,
+          targetVersion: detection.change.targetVersion,
+          origin: 'pull_request',
+        };
+        deps.log(
+          `Detected ${detection.change.section}.${detection.change.packageName}: ${detection.change.fromRange} → ${detection.change.toRange} (exact target ${detection.change.targetVersion}).`,
+        );
       }
     }
 
     if (!target) {
-      const reason = 'No pull request context and no `package`/`version` inputs were provided, so there is nothing to investigate.';
-      await appendSummary(env, `## DepSherpa\n\n${reason}\n`);
-      await writeOutputs(env, { verdict: 'skipped', 'repair-status': 'not_run', 'report-dir': '' });
-      deps.log(`Skipped: ${reason}`);
-      return { status: 'skipped', reason };
+      const reason =
+        'No pull request context and no `package`/`version` inputs were provided, so there is nothing to investigate.';
+      return skip(reason, reason, deps);
     }
 
-    deps.log(`Running the isolated upgrade of ${target.packageName} to ${target.targetVersion} (repair ${inputs.attemptRepair ? 'requested' : 'not requested'}).`);
+    deps.log(
+      `Running the isolated upgrade of ${target.packageName} to ${target.targetVersion} (repair ${
+        inputs.attemptRepair ? 'requested' : 'not requested'
+      }).`,
+    );
     const report = await deps.upgrade({
       repoPath,
       packageName: target.packageName,
@@ -140,21 +170,25 @@ export async function runAction(env: Record<string, string | undefined>, deps: A
     });
 
     const markdown = renderIsolatedUpgradeReport(report);
-    await mkdir(reportDir, { recursive: true });
-    await writeFile(path.join(reportDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`, 'utf8');
-    await writeFile(path.join(reportDir, 'report.md'), markdown, 'utf8');
-    if (report.patch) await writeFile(path.join(reportDir, 'candidate.patch'), `${report.patch}\n`, 'utf8');
-    await appendSummary(env, markdown);
-    await writeOutputs(env, {
-      verdict: report.verdict,
-      'repair-status': report.repair.status,
-      'report-dir': inputs.outputDir,
-      package: target.packageName,
-      'target-version': target.targetVersion,
-    });
-    deps.log(`Verdict: ${report.verdict} · repair: ${report.repair.status} · ${report.changedFiles.length} file(s) changed in the disposable clone.`);
-    const comment = await publishComment(context, env, inputs, report, deps);
-    return { status: 'completed', report, reportDir, comment };
+    await mkdir(reportDirectory, { recursive: true });
+    const files = [path.join(reportDirectory, 'report.json'), path.join(reportDirectory, 'report.md')];
+    await writeFile(files[0], `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+    await writeFile(files[1], markdown, 'utf8');
+    if (report.patch) {
+      files.push(path.join(reportDirectory, 'candidate.patch'));
+      await writeFile(files[2], `${report.patch}\n`, 'utf8');
+    }
+    await deps.writeSummary(boundedSummary(markdown));
+    deps.setOutput('verdict', report.verdict);
+    deps.setOutput('repair-status', report.repair.status);
+    deps.setOutput('report-dir', inputs.outputDir);
+    deps.setOutput('package', target.packageName);
+    deps.setOutput('target-version', target.targetVersion);
+    deps.log(
+      `Verdict: ${report.verdict} · repair: ${report.repair.status} · ${report.changedFiles.length} file(s) changed in the disposable clone.`,
+    );
+    const comment = await publishComment(input, report, deps);
+    return { status: 'completed', report, reportFiles: { directory: reportDirectory, files }, comment };
   } finally {
     await rm(temporaryRoot, { recursive: true, force: true });
   }
