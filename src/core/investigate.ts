@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { analyzeUpgrade, inferPackageManager, listChecks, readManifest } from './manifest.js';
+import { analyzeUpgrade, inferPackageManager, listChecks, readInstalledVersion, readManifest } from './manifest.js';
 import { runChecks } from './runner.js';
 import type { InvestigationReport } from './types.js';
 
@@ -14,7 +14,12 @@ export interface InvestigationOptions {
 export async function investigate(options: InvestigationOptions): Promise<InvestigationReport> {
   const repoPath = path.resolve(options.repoPath);
   const { manifest, manifestPath } = await readManifest(repoPath);
-  const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion);
+  const finding = analyzeUpgrade(
+    manifest,
+    options.packageName,
+    options.targetVersion,
+    await readInstalledVersion(repoPath, options.packageName),
+  );
   const checks = listChecks(manifest);
   const results = options.runProjectChecks
     ? await runChecks(checks, repoPath, options.timeoutMs)
