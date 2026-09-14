@@ -24,9 +24,6 @@ Judges can reproduce the isolated upgrade and the complete Zod repair without an
 - openai (official SDK, any OpenAI-compatible endpoint)
 - TypeScript
 - Node.js 22
-- Next.js
-- Vite / Vinext
-- React
 - Zod
 - npm
 - Git
@@ -44,17 +41,13 @@ cd dep-sherpa
 npm install
 npm run typecheck
 npm test
-npm run build
+npm run lint
 ```
 
 Then exercise the public paths:
 
-0. **GitHub Action**  
+1. **GitHub Action**  
    Add the workflow from the README to any npm repository and open a pull request that bumps one dependency in `package.json`; the PR receives the report comment and the run uploads the `depsherpa-report` artifact. Locally, `npm test -- --run src/action` runs the same orchestration against a shallow Dependabot-style checkout.
-
-1. **Inspector (read-only, live evidence)**  
-   `npm run dev`  
-   The packet starts empty. Inspect a public GitHub repository. The brief, evidence, and local handoff are filled only from GitHub and npm. No canned Zod story is shown.
 
 2. **Isolated upgrade + deterministic repair**  
    `npm run demo:repair`  
@@ -66,7 +59,7 @@ Then exercise the public paths:
 
 Optional: set `OPENAI_API_KEY` (and `OPENAI_BASE_URL` for a compatible provider) before `upgrade --attempt-repair` to see a model proposal for a failure no recipe covers. The model cannot write files.
 
-What to look for: an evidence chain, isolation before mutation, a three-file / twelve-line repair cap, and a closed safety gate. What not to expect: a commit, a push, an automatic merge, or a general auto-fixer.
+What to look for: an evidence chain, isolation before mutation, a three-file / twelve-line repair cap, and a human decision that the Action cannot take for you. What not to expect: a commit, a push, an automatic merge, or a general auto-fixer.
 
 ## License
 

@@ -5,12 +5,11 @@ import { createOpenAIProposalGenerator, describeModelConfig, resolveModelConfig 
 import { renderIsolatedUpgradeReport } from '../core/report';
 import type { IsolatedUpgradeReport, PackageManifest } from '../core/types';
 import type { IsolatedUpgradeOptions } from '../core/upgrade';
-import { validatePackageName, validateTargetVersion } from '../harness/request';
 import { commentMarker, formatOutputAssignments, renderPullRequestComment } from './comment';
 import { readGitHubContext, type GitHubContext } from './context';
 import { detectDependencyChange } from './detect';
 import { upsertPullRequestComment } from './github';
-import { readActionInputs, type ActionInputs } from './inputs';
+import { readActionInputs, validatePackageName, validateTargetVersion, type ActionInputs } from './inputs';
 import { prepareSourceCheckout } from './source';
 
 /**
@@ -49,9 +48,9 @@ function targetFromInputs(inputs: ActionInputs): Target | null {
   if (!inputs.packageName && !inputs.targetVersion) return null;
   if (!inputs.packageName || !inputs.targetVersion) throw new Error('Provide both `package` and `version` inputs, or neither to detect the change from a pull request.');
   const packageName = validatePackageName(inputs.packageName);
-  if (!packageName.ok) throw new Error(packageName.error.message);
+  if (!packageName.ok) throw new Error(packageName.message);
   const targetVersion = validateTargetVersion(inputs.targetVersion);
-  if (!targetVersion.ok) throw new Error(targetVersion.error.message);
+  if (!targetVersion.ok) throw new Error(targetVersion.message);
   return { packageName: packageName.value, targetVersion: targetVersion.value, origin: 'inputs' };
 }
 

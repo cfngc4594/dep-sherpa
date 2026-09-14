@@ -1,6 +1,6 @@
 # DepSherpa
 
-DepSherpa is a GitHub Action that turns a dependency-bump pull request into a change-control packet. On the runner it upgrades the dependency inside a disposable clone of the base commit, compares the repository's own `lint`, `typecheck`, `test`, and `build` before and after, may propose a bounded source repair, verifies it, and reports back — as a job summary, an artifact, and one pull-request comment. It never commits, pushes, or writes to the repository; the human decision stays with the reviewer.
+DepSherpa is a GitHub Action that turns a dependency-bump pull request into a change-control packet. A CLI with the same core is included for local reproduction. On the runner it upgrades the dependency inside a disposable clone of the base commit, compares the repository's own `lint`, `typecheck`, `test`, and `build` before and after, may propose a bounded source repair, verifies it, and reports back — as a job summary, an artifact, and one pull-request comment. It never commits, pushes, or writes to the repository; the human decision stays with the reviewer.
 
 **License:** [MIT](LICENSE) · Devpost copy: [docs/DEVPOST.md](docs/DEVPOST.md) · Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Security: [SECURITY.md](SECURITY.md)
 
@@ -119,19 +119,15 @@ The generic, non-recipe closed loop is covered by a test that injects a structur
 npm test -- --run src/core/repair.test.ts -t "validates, applies, and verifies a non-recipe Agent proposal"
 ```
 
-## Web console (secondary)
-
-`npm run dev` also serves a web console. Its **public read-only investigation** mode reads a public GitHub `package.json`, verifies a target on npm, and retains matching GitHub Releases without executing anything, so it is safe to host. Its **local isolated upgrade** mode is attached only inside the dev server on your own machine and drives the same core through a loopback-only API; hosted deployments answer `LOCAL_EXECUTION_UNAVAILABLE`. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The GitHub Action is the primary way to use DepSherpa.
-
 ## Verification
 
 ```bash
 npm run typecheck
 npm test
-npm run build
+npm run lint
 ```
 
-The suites cover the deterministic core (major/minor/patch/peer/dev/optional/missing/invalid cases and report invariants), the bounded repair policy, the OpenAI-compatible generator (strict schema, fallback, failure modes, configuration resolution), the Action (input validation, PR detection, shallow-checkout base preparation, summary/outputs/artifact files, comment create/update), and the web console's environment gate.
+The suites cover the deterministic core (major/minor/patch/peer/dev/optional/missing/invalid cases and report invariants), the bounded repair policy, the OpenAI-compatible generator (strict schema, fallback, failure modes, configuration resolution), and the Action (input validation, PR detection, shallow-checkout base preparation, summary/outputs/artifact files, comment create/update). `npm run action` runs the Action entry point locally against the current directory when the GitHub environment variables are set.
 
 ## Repository map
 
@@ -144,8 +140,7 @@ scripts/demo-repair.ts    isolated Zod repair demonstration
 src/core/                 deterministic core: analysis, isolated runner, repair policy, reports
 src/agent/openai.ts       OpenAI-compatible proposal generator (no tools)
 src/action/               Action orchestration: inputs, PR detection, base checkout, comment
-src/harness/, src/web/    local web console harness and UI
-app/                      web console (public inspector + local mode)
+src/evals/                deterministic evaluation scenarios
 fixtures/                 synthetic fixtures
 docs/                     architecture and Devpost copy
 ```

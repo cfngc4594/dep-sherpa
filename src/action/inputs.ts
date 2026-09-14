@@ -1,3 +1,5 @@
+import semver from 'semver';
+
 /**
  * Inputs the GitHub Action accepts. `action.yml` maps each `with:` input to one
  * of these environment variables; nothing else is read from the workflow, so a
@@ -10,6 +12,27 @@ export interface ActionInputs {
   comment: boolean;
   /** Directory (relative to the workspace) that receives report.json, report.md, and candidate.patch. */
   outputDir: string;
+}
+
+export type InputValidation = { ok: true; value: string } | { ok: false; message: string };
+
+const npmPackageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
+
+/** Only a valid lowercase npm package name may reach the core. */
+export function validatePackageName(value: string): InputValidation {
+  const packageName = value.trim();
+  if (!packageName || packageName.length > 214 || !npmPackageName.test(packageName)) {
+    return { ok: false, message: 'package must be a valid lowercase npm package name.' };
+  }
+  return { ok: true, value: packageName };
+}
+
+/** Only an exact semantic version may reach the core; ranges and dist-tags are rejected. */
+export function validateTargetVersion(value: string): InputValidation {
+  const targetVersion = value.trim();
+  const exact = targetVersion.length <= 64 && !/\s/.test(targetVersion) ? semver.valid(targetVersion, { loose: false }) : null;
+  if (!exact) return { ok: false, message: 'version must be an exact semantic version such as 4.1.5; ranges and dist-tags are not accepted.' };
+  return { ok: true, value: exact };
 }
 
 export function parseBooleanInput(value: string | undefined, fallback: boolean): boolean {

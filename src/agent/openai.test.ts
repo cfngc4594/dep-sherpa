@@ -48,7 +48,7 @@ function fakeFetch(responder: (request: { url: string; body: Record<string, unkn
   const impl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
     const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
-    const headers = new Headers(init?.headers as HeadersInit | undefined);
+    const headers = new Headers(init?.headers as ConstructorParameters<typeof Headers>[0]);
     const request = { url, body, headers };
     calls$.push(request);
     calls += 1;

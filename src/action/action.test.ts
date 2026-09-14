@@ -4,12 +4,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderIsolatedUpgradeReport } from '../core/report';
-import { sampleIsolatedUpgradeReport, sampleRepairAttempt } from '../harness/report-fixture';
+import { sampleIsolatedUpgradeReport, sampleRepairAttempt } from './report-fixture';
 import { commentMarker, formatOutputAssignments, renderPullRequestComment } from './comment';
 import { pullRequestFromPayload, readGitHubContext } from './context';
 import { detectDependencyChange, exactVersionFromRange } from './detect';
 import { upsertPullRequestComment } from './github';
-import { parseBooleanInput, readActionInputs } from './inputs';
+import { parseBooleanInput, readActionInputs, validatePackageName, validateTargetVersion } from './inputs';
 import { runAction, type ActionRunDependencies } from './run';
 import { prepareSourceCheckout } from './source';
 
@@ -100,6 +100,13 @@ describe('action inputs and context', () => {
     expect(readActionInputs({ DEPSHERPA_PACKAGE: ' zod ', DEPSHERPA_TARGET_VERSION: '4.1.5' })).toEqual({ packageName: 'zod', targetVersion: '4.1.5', attemptRepair: true, comment: true, outputDir: 'depsherpa-report' });
     expect(() => readActionInputs({ DEPSHERPA_OUTPUT_DIR: '../outside' })).toThrow('relative path');
     expect(() => readActionInputs({ DEPSHERPA_OUTPUT_DIR: '/etc' })).toThrow('relative path');
+  });
+
+  it('accepts only valid npm names and exact versions', () => {
+    expect(validatePackageName('@tanstack/react-query')).toEqual({ ok: true, value: '@tanstack/react-query' });
+    for (const name of ['Zod', '../zod', 'zod; rm -rf /', 'zod@4', '', '$(whoami)']) expect(validatePackageName(name).ok).toBe(false);
+    expect(validateTargetVersion('v4.1.5')).toEqual({ ok: true, value: '4.1.5' });
+    for (const version of ['^4.1.5', '~4.1.0', 'latest', '4', '4.1.x', '>=4.0.0', '']) expect(validateTargetVersion(version).ok).toBe(false);
   });
 
   it('reads the pull request context only from a well-formed event payload', async () => {

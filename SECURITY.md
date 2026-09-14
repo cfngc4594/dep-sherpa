@@ -33,11 +33,6 @@ DepSherpa treats source changes and external writes as separate capabilities. Th
 - The base commit is fetched by SHA when the checkout is shallow, checked out into a temporary directory through a short-lived local branch that is deleted afterwards, and the temporary directory is removed when the run ends. The workspace is otherwise left as `actions/checkout` produced it, plus the `report-dir` files.
 - The Action never fails a workflow because of a verdict; it only fails on invalid inputs or infrastructure errors, so it cannot be used as an automatic merge gate by accident. Consumers may build their own gate from the `verdict` output.
 
-## Web console
-
-- The public inspector reads only public GitHub repository metadata and a selected `package.json` over fixed HTTPS origins and never executes fetched content.
-- The local isolated-upgrade mode exists only inside the Node process of `npm run dev`, answers loopback same-origin requests only, accepts the same strictly typed fields as the Action, and is rejected by hosted builds, which contain no execution code under `/api/local/*`. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
 ## Reporting a vulnerability
 
 Please open a private GitHub security advisory once the public repository is available. Do not include credentials, private source code, or production logs in a public issue.

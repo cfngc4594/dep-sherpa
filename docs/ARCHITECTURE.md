@@ -1,6 +1,6 @@
 # Architecture
 
-DepSherpa keeps proposal generation, deterministic policy, isolated execution, and external effects in separate trust zones. This diagram matches the shipped code: a GitHub Action as the primary entry point, a CLI and a web console as secondary entry points, one isolated runner shared by all of them, high-confidence recipe proposal generators, a no-tool model proposal step over any OpenAI-compatible endpoint, deterministic validation, and a human approval gate. The only external write is the Action's report comment.
+DepSherpa keeps proposal generation, deterministic policy, isolated execution, and external effects in separate trust zones. This diagram matches the shipped code: a GitHub Action as the entry point, a CLI sharing the same core for local reproduction, one isolated runner shared by both, high-confidence recipe proposal generators, a no-tool model proposal step over any OpenAI-compatible endpoint, deterministic validation, and a human approval gate. The only external write is the Action's report comment.
 
 ```text
 Dependabot / Renovate pull request
@@ -14,31 +14,17 @@ Dependabot / Renovate pull request
 
 ```mermaid
 flowchart TB
-    U[Maintainer] --> UI[Next.js web console]
-    U --> CLI[DepSherpa CLI]
+    U[Maintainer] --> CLI[DepSherpa CLI]
     PRBOT[Dependabot or Renovate PR] --> ACTION[GitHub Action on the repo's runner]
-    ACTION --> DETECT["Detect one dependency change<br/>base vs head package.json"]
+    ACTION --> INPUTS["Typed inputs only<br/>npm name · exact version · booleans"]
+    INPUTS --> DETECT["Detect one dependency change<br/>base vs head package.json"]
     DETECT --> BASE[Separate clone of the PR base commit]
     BASE --> UPGRADE
-
-    UI --> API["POST /api/investigate<br/>read-only evidence"]
-    UI --> LOCALAPI["POST /api/local/upgrade<br/>local harness only"]
-    LOCALAPI --> GATE{Environment gate<br/>Node dev harness · loopback · same-origin}
-    GATE -->|hosted or production| REJECT[403 LOCAL_EXECUTION_UNAVAILABLE]
-    GATE -->|local dev machine| VALIDATE[Strict request validation<br/>Git root · npm name · exact version]
-    VALIDATE --> UPGRADE
-
-    API --> GH[Public GitHub manifest and lockfile]
-    API --> NPM[npm version metadata]
-    API --> REL[Package GitHub Releases]
-    GH --> CORE[Deterministic investigation core]
-    NPM --> CORE
-    REL --> CORE
 
     CLI --> INSPECT["inspect<br/>read manifest and optional checks"]
     CLI --> UPGRADE["upgrade<br/>isolated clone only"]
 
-    INSPECT --> CORE
+    INSPECT --> CORE[Deterministic investigation core]
 
     UPGRADE --> ISO[Disposable clone of committed HEAD]
     ISO --> NPMRUN["npm ci / install<br/>lifecycle scripts blocked"]
@@ -60,11 +46,11 @@ flowchart TB
     CORE --> CHECKS
     CHECKS --> REPORT[Evidence report]
     REPORT --> COMMENT["Job summary · artifact · one PR comment<br/>(the Action's only write)"]
-    REPORT --> GATE{Human approval}
-    COMMENT --> GATE
-    GATE -->|reject or ignore| STOP[No external effect]
-    GATE -->|apply the reviewed patch yourself| LOCAL[Reviewer-owned change]
-    GATE -.->|future separately authorized| PR[Draft pull request]
+    REPORT --> HUMAN{Human approval}
+    COMMENT --> HUMAN
+    HUMAN -->|reject or ignore| STOP[No external effect]
+    HUMAN -->|apply the reviewed patch yourself| LOCAL[Reviewer-owned change]
+    HUMAN -.->|future separately authorized| PR[Draft pull request]
 ```
 
 ## Surfaces
@@ -72,8 +58,6 @@ flowchart TB
 | Surface | What it does | What it never does |
 | --- | --- | --- |
 | GitHub Action (`action.yml`, `src/action`) | On a dependency PR (or `workflow_dispatch` inputs), checks out the base commit separately, runs the isolated upgrade with optional repair, writes the job summary and `depsherpa-report` artifact, and creates or updates one PR comment | Commit, push, apply the patch to the checkout, fail the workflow on a verdict, or accept commands/scripts/executables as inputs |
-| Public inspector (`app/`, hosted or local) | Live public GitHub/npm evidence for the repository the user submits; the packet stays empty until then | Clone, install, execute repository scripts, mutate source, or write to GitHub |
-| Local upgrade mode (`app/` + `src/harness`, `npm run dev` only) | Same isolated upgrade, controlled repair, and verification as the CLI, triggered from the browser through a loopback-only API; shows stages, comparison, provenance, diff, and the human gate | Run in the browser, accept commands or paths other than a Git root, exist in a hosted build, touch the source repository, commit, push, or open a PR |
 | CLI `inspect` | Read `package.json`, classify the jump, optionally run declared checks | Change files or create a commit |
 | CLI `upgrade` | Copy committed `HEAD`, apply an exact npm target, compare checks, optionally request and validate a bounded proposal | Touch the source repository, give the model write tools, commit, push, or open a PR |
 
@@ -93,29 +77,13 @@ flowchart TB
 
 ### Command runner
 
-The Action, the CLI, and the local web harness execute only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. DepSherpa spawns npm with `shell: false`, captures bounded diagnostic output, sets `CI=1`, removes caller-directory hints from the child environment, and terminates the process group when a command exceeds its timeout. npm still executes repository scripts with normal npm semantics, so the first release requires a repository the operator trusts and does not claim OS-level network or filesystem isolation. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, removes the source `origin` before project code runs, disables npm lifecycle scripts, compares baseline and candidate checks, and captures the complete final diff. The temporary clone is removed unless the operator explicitly requests retention.
+The Action and the CLI execute only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. DepSherpa spawns npm with `shell: false`, captures bounded diagnostic output, sets `CI=1`, removes caller-directory hints from the child environment, and terminates the process group when a command exceeds its timeout. npm still executes repository scripts with normal npm semantics, so the first release requires a repository the operator trusts and does not claim OS-level network or filesystem isolation. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, removes the source `origin` before project code runs, disables npm lifecycle scripts, compares baseline and candidate checks, and captures the complete final diff. The temporary clone is removed unless the operator explicitly requests retention.
 
 ### Bounded repair policy
 
 Repair is a separate opt-in capability. Recipes and the model can only generate `RepairProposal` data. Each `RepairEdit` contains a normalized repository-relative path, exact expected text, replacement, rationale, and the exact diagnostic it relies on. The deterministic policy rejects traversal and absolute paths, untracked or symlinked files, binary/invalid UTF-8 content, tests, fixtures, migrations, configuration, unsupported extensions, contexts the generator did not receive, ambiguous or stale expected text, overlapping edits, more than three files, and more than twelve changed lines.
 
 Only after that validation does the core re-read the files and apply exact replacements in the disposable clone. It captures the complete patch before verification, reruns every declared check, compares the patch again afterward, and audits unexpected paths. Only all-green checks with no unexpected change produce `verified`. Recipe generation, model generation, unsupported evidence, policy rejection, failed verification, and successful verification remain separate report states. `verified` describes observed checks, not a guarantee that a model suggestion is semantically correct.
-
-### Hosted evidence intake
-
-`app/api/investigate/route.ts` accepts a GitHub repository root URL, a path ending in `package.json`, a lowercase npm package name, and an exact target version. It calls only fixed GitHub and npm HTTPS origins, parses the fetched manifest as data, and returns a read-only report. When npm declares a GitHub source repository, it scans the 50 most recent public Releases, semantically matches records inside the requested upgrade range, and retains at most six bounded excerpts with source links. It has no filesystem, command-execution, credential, or mutation capability.
-
-### Local web harness
-
-`vinext dev` serves the Next.js application through the Cloudflare Workers emulator, which cannot spawn processes or read the developer's disk — the same constraint a hosted deployment has. The Vite dev server itself, however, is an ordinary Node process on the developer's machine. `src/harness/vite-plugin.ts` attaches a middleware there (`apply: 'serve'`) in front of the Worker so `/api/local/*` is answered by Node:
-
-- `src/harness/gate.ts` — pure environment gate. Enabled only for an attached Node harness outside `NODE_ENV=production` and not disabled by `DEPSHERPA_LOCAL_HARNESS=0`; request-level checks require a loopback host and socket and a same-origin `Origin`. Workers runtimes are detected and refused.
-- `src/harness/request.ts` — strict parsing of the only accepted fields: absolute Git-root path, npm package name, exact semantic version, `attemptRepair`, `keepWorkspace`. Unknown fields are rejected.
-- `src/harness/repository.ts` — confirms the path exists and is the Git root using the core command runner.
-- `src/harness/api.ts` — a `Request`/`Response` handler with injected dependencies. It calls `investigate` and `upgradeInIsolation` from `src/core` (wired in `src/harness/runtime.ts`), streams `accepted`/`heartbeat`/`report`/`error` events as NDJSON so long runs survive browser timeouts, allows one run at a time, and returns the CLI's `IsolatedUpgradeReport` verbatim together with the CLI's Markdown rendering.
-- `app/api/local/*/route.ts` — the handlers a production build ships. They import only `src/harness/hosted.ts` and the pure gate, never the core, and always reject with `LOCAL_EXECUTION_UNAVAILABLE`. A test asserts that no execution module is reachable from them.
-
-`src/web/` holds the browser side: `local-client.ts` talks only to the same-origin API, `local-report.ts` derives the seven stage states (dependency preparation, baseline checks, upgrade, candidate checks, proposal generation, policy conclusion, verification) from the report rather than inventing them, and `local-upgrade-console.tsx` renders verdict, comparison, diagnostics, provenance, evidence, complete diff, verification, unexpected changes, and the human decision without any apply/commit/push/PR control.
 
 ### External effects
 
@@ -124,7 +92,7 @@ The Action's single report comment is the only external write in the codebase. T
 ## Evidence chain
 
 1. Inventory: locate the dependency and classify the requested version jump.
-2. Release evidence: the public inspector retains matching GitHub Releases; the local runner retains the installed target package manifest and a bounded published migration/changelog excerpt when available.
+2. Release evidence: the isolated runner retains the installed target package manifest and a bounded published migration/changelog excerpt when available.
 3. Isolated upgrade: apply the exact target inside a disposable clone of committed `HEAD` (the pull request's base commit in the Action).
 4. Diagnosis and context: compare baseline and candidate checks, retain bounded diagnostics, and read only attributable tracked source excerpts.
 5. Proposal: use a high-confidence recipe when one matches; otherwise, if a model is configured, ask it for structured candidate data. Insufficient evidence or an unavailable endpoint stops safely.
@@ -135,4 +103,4 @@ The Action's single report comment is the only external write in the codebase. T
 
 Open a Dependabot-style pull request that bumps one dependency in a repository with the workflow from the README. The Action detects the change, checks out the base commit, runs the isolated upgrade on the runner, and leaves a comment with the baseline-versus-candidate table, diagnostics, repair provenance (recipe, model, or none), the candidate patch, and the human decision; the job summary and the `depsherpa-report` artifact hold the complete report. With an `openai-api-key` secret configured, non-recipe failures may receive a model proposal; without it the report records `agent_unavailable` and the recipes still run.
 
-The same run is reproducible offline: `npm run demo:repair` performs the real Zod recipe demonstration from the terminal, and the web console started with `npm run dev` can run it from the browser in **Local isolated upgrade** mode. The generic non-recipe loop is covered by the Monaco-style test named `validates, applies, and verifies a non-recipe Agent proposal`; it injects structured model output so the complete policy/application/verification story can run without any network access.
+The same run is reproducible offline: `npm run demo:repair` performs the real Zod recipe demonstration from the terminal. The generic non-recipe loop is covered by the Monaco-style test named `validates, applies, and verifies a non-recipe Agent proposal`; it injects structured model output so the complete policy/application/verification story can run without any network access.

@@ -1,7 +1,7 @@
 import type { CommandResult, IsolatedUpgradeReport, RepairAttempt } from '../core/types';
 
 /**
- * A compact, realistic `IsolatedUpgradeReport` used by harness and UI tests.
+ * A compact, realistic `IsolatedUpgradeReport` used by the Action tests.
  * It mirrors the shape produced by `upgradeInIsolation` for the Zod recipe
  * demonstration so tests never need npm, Git, or network access.
  */

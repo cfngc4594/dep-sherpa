@@ -1,20 +1,8 @@
 # dependencies
 /node_modules
-/.pnp
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/versions
 
 # testing
 /coverage
-
-# next.js
-/.next/
-/.vinext/
-/out/
 
 # misc
 .DS_Store
@@ -22,24 +10,11 @@
 
 # debug
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnpm-debug.log*
 *.tsbuildinfo
 
 # local environment
 .env*
 !.env.example
 
-# local design review artifacts
-/.impeccable/review/
-/.impeccable/build/
-/.impeccable/capture.mjs
-
-# deployment and generated files
-.vercel
-next-env.d.ts
-/dist/
-/.wrangler/
-/outputs/
-/work/
+# report output produced by local runs of the Action entry point
+/depsherpa-report/
