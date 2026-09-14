@@ -14,7 +14,6 @@ import {
   FileCode,
   GitBranch,
   PackageSearch,
-  Play,
   RotateCcw,
   Search,
   ShieldCheck,
@@ -23,8 +22,12 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import type { RemoteInvestigationReport } from '@/src/core/types';
+import { localePreferences } from '@/src/i18n/locale';
+import { useLocale, type Translate } from '@/src/i18n/use-locale';
+import { LocalUpgradeConsole } from '@/src/web/local-upgrade-console';
+import { ModeSwitch, type ExecutionMode } from '@/src/web/mode-switch';
+import { useLocalCapabilities } from '@/src/web/use-local-capabilities';
 
-type RunState = 'idle' | 'running' | 'ready' | 'approved';
 type InspectorState = 'idle' | 'loading' | 'ready' | 'error';
 type View = 'brief' | 'evidence' | 'patch';
 type Surface = 'investigations' | 'history';
@@ -65,28 +68,11 @@ function parseHistory(value: string | null): HistoryEntry[] {
 
 const views: View[] = ['brief', 'evidence', 'patch'];
 
-const baseStages = [
-  { label: 'Repository inventory', detail: 'pnpm workspace · 37 direct dependencies', icon: PackageSearch },
-  { label: 'Release evidence', detail: '3 relevant migration notes retained', icon: BookOpenText },
-  { label: 'Isolated upgrade', detail: 'worktree depsherpa/zod-4.1.5', icon: GitBranch },
-  { label: 'Failure diagnosis', detail: '1 breaking API reference located', icon: TriangleAlert },
-  { label: 'Bounded repair', detail: '2 lines changed · no public API drift', icon: FileCode },
-  { label: 'Verification', detail: 'typecheck · 48 tests · production build', icon: ShieldCheck },
-];
-
-const syntheticEvidence = [
-  ['CHANGELOG', 'ZodError.errors was replaced by .issues in v4.'],
-  ['COMMAND', 'pnpm typecheck → TS2339 at validation.ts:42'],
-  ['PATCH', 'Mapped error.errors to error.issues in one call site.'],
-  ['COMMAND', 'pnpm test → 48 passed in 6.2s'],
-  ['COMMAND', 'pnpm build → completed in 11.8s'],
-];
-
-const initialForm: InspectorForm = {
-  repositoryUrl: 'https://github.com/colinhacks/zod',
+const emptyForm: InspectorForm = {
+  repositoryUrl: '',
   manifestPath: 'package.json',
-  packageName: 'typescript',
-  targetVersion: '5.9.3',
+  packageName: '',
+  targetVersion: '',
 };
 
 function LineMark({ done, active }: { done: boolean; active: boolean }) {
@@ -97,90 +83,109 @@ function packageInitial(packageName: string): string {
   return packageName.split('/').at(-1)?.charAt(0).toUpperCase() || 'D';
 }
 
-function humanizeSection(section: string): string {
-  return section.replace(/([A-Z])/g, ' $1').toLowerCase();
+function sectionLabel(section: string, t: Translate): string {
+  if (section === 'devDependencies') return t('sectionDevDependencies');
+  if (section === 'peerDependencies') return t('sectionPeerDependencies');
+  if (section === 'optionalDependencies') return t('sectionOptionalDependencies');
+  return t('sectionDependencies');
+}
+
+function sourceLabel(source: string, t: Translate): string {
+  if (source === 'package-lock') return t('sourcePackageLock');
+  if (source === 'bun-lock') return t('sourceBunLock');
+  if (source === 'manifest-exact') return t('sourceManifestExact');
+  return t('sourceManifestRange');
+}
+
+function decisionLabel(status: string, t: Translate): string {
+  if (status === 'upgrade') return t('decisionUpgrade');
+  if (status === 'already-installed') return t('decisionInstalled');
+  if (status === 'downgrade') return t('decisionDowngrade');
+  return t('decisionUnresolved');
+}
+
+function riskLabel(risk: string, t: Translate): string {
+  if (risk === 'low') return t('riskLow');
+  if (risk === 'medium') return t('riskMedium');
+  if (risk === 'high') return t('riskHigh');
+  return t('riskUnknown');
+}
+
+function errorMessage(code: string | undefined, t: Translate): string {
+  if (code === 'INVALID_INPUT') return t('errorINVALID_INPUT');
+  if (code === 'REPOSITORY_NOT_FOUND') return t('errorREPOSITORY_NOT_FOUND');
+  if (code === 'MANIFEST_NOT_FOUND') return t('errorMANIFEST_NOT_FOUND');
+  if (code === 'NPM_VERSION_NOT_FOUND') return t('errorNPM_VERSION_NOT_FOUND');
+  if (code === 'UPSTREAM_RATE_LIMITED') return t('errorUPSTREAM_RATE_LIMITED');
+  if (code === 'UPSTREAM_UNAVAILABLE') return t('errorUPSTREAM_UNAVAILABLE');
+  return t('errorFallback');
 }
 
 export default function Home() {
+  const { preference, locale, setPreference, t } = useLocale();
+  const dateLocale = locale === 'zh-CN' ? 'zh-CN' : 'en-GB';
   const [surface, setSurface] = useState<Surface>('investigations');
-  const [runState, setRunState] = useState<RunState>('idle');
-  const [step, setStep] = useState(-1);
+  const [mode, setMode] = useState<ExecutionMode>('public');
+  const localAvailability = useLocalCapabilities();
   const [view, setView] = useState<View>('brief');
-  const [form, setForm] = useState<InspectorForm>(initialForm);
+  const [form, setForm] = useState<InspectorForm>(emptyForm);
   const [inspectorState, setInspectorState] = useState<InspectorState>('idle');
-  const [inspectorError, setInspectorError] = useState('');
+  const [inspectorErrorCode, setInspectorErrorCode] = useState<string | undefined>();
   const [remoteReport, setRemoteReport] = useState<RemoteInvestigationReport | null>(null);
   const [copyStatus, setCopyStatus] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
 
   useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
     if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
   }, []);
 
   const isRemote = remoteReport !== null;
-  const finished = !isRemote && (runState === 'ready' || runState === 'approved');
+  const inspectorError = inspectorErrorCode ? errorMessage(inspectorErrorCode, t) : '';
 
   const remoteEvidence = useMemo(() => {
     if (!remoteReport) return [];
     const availableChecks = remoteReport.checks.filter((check) => check.available).map((check) => check.name);
     return [
-      ['MANIFEST', `${remoteReport.finding.packageName} is declared as ${remoteReport.finding.declaredRange} in ${humanizeSection(remoteReport.finding.section)}.`],
+      ['MANIFEST', t('evidenceManifest', { package: remoteReport.finding.packageName, range: remoteReport.finding.declaredRange, section: sectionLabel(remoteReport.finding.section, t) })],
       ['BASELINE', remoteReport.baseline.message],
-      ['NPM', `${remoteReport.finding.targetVersion} exists; npm latest points to ${remoteReport.registry.latestVersion ?? 'an unreported version'}.`],
+      ['NPM', t('evidenceNpm', { version: remoteReport.finding.targetVersion, latest: remoteReport.registry.latestVersion ?? t('evidenceNpmUnknown') })],
       ['DECISION', remoteReport.decision.message],
       ['RELEASE', remoteReport.releases.message],
-      ['SOURCE', `${remoteReport.source.manifestPath} at ${remoteReport.source.manifestSha.slice(0, 7)} on ${remoteReport.source.defaultBranch}.`],
-      ['CHECKS', availableChecks.length ? `Discovered ${availableChecks.join(', ')} scripts for the local runner.` : 'No standard verification scripts were declared.'],
-      ['POLICY', 'No repository code was cloned, executed, changed, or pushed by this web inspection.'],
+      ['SOURCE', t('evidenceSource', { path: remoteReport.source.manifestPath, sha: remoteReport.source.manifestSha.slice(0, 7), branch: remoteReport.source.defaultBranch })],
+      ['CHECKS', availableChecks.length ? t('evidenceChecks', { checks: availableChecks.join(', ') }) : t('evidenceNoChecks')],
+      ['POLICY', t('evidencePolicy')],
     ];
-  }, [remoteReport]);
+  }, [remoteReport, t]);
 
   const stageItems = useMemo(() => {
-    if (!remoteReport) return baseStages;
+    const blueprint = [
+      { label: t('stageInventory'), idle: t('stageInventoryIdle'), icon: PackageSearch },
+      { label: t('stageRelease'), idle: t('stageReleaseIdle'), icon: BookOpenText },
+      { label: t('stageUpgrade'), idle: t('stageUpgradeIdle'), icon: GitBranch },
+      { label: t('stageDiagnose'), idle: t('stageDiagnoseIdle'), icon: TriangleAlert },
+      { label: t('stageRepair'), idle: t('stageRepairIdle'), icon: FileCode },
+      { label: t('stageVerify'), idle: t('stageVerifyIdle'), icon: ShieldCheck },
+    ];
+    if (!remoteReport) return blueprint;
     const availableChecks = remoteReport.checks.filter((check) => check.available).length;
     const noUpgrade = remoteReport.decision.status === 'already-installed';
     const localUpgradeAvailable = remoteReport.decision.status === 'upgrade' && remoteReport.packageManager === 'npm';
     return [
-      { ...baseStages[0], detail: `${remoteReport.packageManager} · ${remoteReport.baseline.path ?? remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
-      { ...baseStages[1], detail: remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} matching GitHub release notes retained` : 'npm confirmed · release notes not found' },
-      { ...baseStages[2], detail: noUpgrade ? 'Not required · target already resolved' : localUpgradeAvailable ? 'Available through the local npm runner' : `${remoteReport.packageManager} execution is not supported yet` },
-      { ...baseStages[3], detail: noUpgrade ? 'No changed candidate to diagnose' : localUpgradeAvailable ? 'Local CLI compares baseline and candidate' : 'Awaiting a supported isolated runner' },
-      { ...baseStages[4], detail: noUpgrade ? 'No source repair proposed' : localUpgradeAvailable ? 'Opt-in · at most 3 source files and 12 lines' : 'No repair proposed without execution' },
-      { ...baseStages[5], detail: `${availableChecks} checks discovered · ${noUpgrade ? 'optional' : 'not executed'}` },
+      { ...blueprint[0], idle: `${remoteReport.packageManager} · ${remoteReport.baseline.path ?? remoteReport.source.manifestPath} · ${remoteReport.source.manifestSha.slice(0, 7)}` },
+      { ...blueprint[1], idle: remoteReport.releases.status === 'found' ? t('stageReleaseFound', { count: remoteReport.releases.notes.length }) : t('stageReleaseMissing') },
+      { ...blueprint[2], idle: noUpgrade ? t('stageUpgradeSkip') : localUpgradeAvailable ? t('stageUpgradeReady') : t('stageUpgradeBlocked', { manager: remoteReport.packageManager }) },
+      { ...blueprint[3], idle: noUpgrade ? t('stageDiagnoseSkip') : localUpgradeAvailable ? t('stageDiagnoseReady') : t('stageDiagnoseWait') },
+      { ...blueprint[4], idle: noUpgrade ? t('stageRepairSkip') : localUpgradeAvailable ? t('stageRepairReady') : t('stageRepairWait') },
+      { ...blueprint[5], idle: t('stageVerifyCount', { count: availableChecks, state: noUpgrade ? t('stageVerifyOptional') : t('stageVerifyPending') }) },
     ];
-  }, [remoteReport]);
+  }, [remoteReport, t]);
 
-  const runInvestigation = () => {
-    if (runState === 'running') return;
-    setRunState('running');
-    setStep(0);
-    setView('brief');
-    let next = 0;
-    const advance = () => {
-      next += 1;
-      if (next < baseStages.length) {
-        setStep(next);
-        timerRef.current = setTimeout(advance, 560);
-      } else {
-        setRunState('ready');
-        setStep(baseStages.length);
-        setView('patch');
-      }
-    };
-    timerRef.current = setTimeout(advance, 560);
-  };
-
-  const resetDemo = () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
+  const clearInspection = () => {
     setRemoteReport(null);
     setInspectorState('idle');
-    setInspectorError('');
-    setRunState('idle');
-    setStep(-1);
+    setInspectorErrorCode(undefined);
     setView('brief');
   };
 
@@ -188,7 +193,7 @@ export default function Home() {
     event.preventDefault();
     if (inspectorState === 'loading') return;
     setInspectorState('loading');
-    setInspectorError('');
+    setInspectorErrorCode(undefined);
     setCopyStatus('');
 
     try {
@@ -199,10 +204,10 @@ export default function Home() {
       });
       const payload = await response.json() as {
         report?: RemoteInvestigationReport;
-        error?: { message?: string };
+        error?: { code?: string; message?: string };
       };
       if (!response.ok || !payload.report) {
-        throw new Error(payload.error?.message || 'The investigation could not be completed.');
+        throw Object.assign(new Error(payload.error?.message || t('errorFallback')), { code: payload.error?.code });
       }
       setRemoteReport(payload.report);
       const historyEntry: HistoryEntry = {
@@ -233,12 +238,10 @@ export default function Home() {
         // History remains available for this tab when browser storage is unavailable.
       }
       setInspectorState('ready');
-      setRunState('idle');
-      setStep(-1);
       setView('brief');
     } catch (error) {
       setInspectorState('error');
-      setInspectorError(error instanceof Error ? error.message : 'The investigation could not be completed.');
+      setInspectorErrorCode(error && typeof error === 'object' && 'code' in error && typeof error.code === 'string' ? error.code : undefined);
     }
   };
 
@@ -249,7 +252,7 @@ export default function Home() {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
       copyTimerRef.current = setTimeout(() => setCopyStatus(''), 2600);
     } catch {
-      setCopyStatus('Clipboard access was blocked. Select the text and copy it manually.');
+      setCopyStatus(t('clipboardBlocked'));
     }
   };
 
@@ -263,15 +266,13 @@ export default function Home() {
     setForm(entry.form);
     setRemoteReport(entry.report);
     setInspectorState('ready');
-    setInspectorError('');
-    setRunState('idle');
-    setStep(-1);
+    setInspectorErrorCode(undefined);
     setView('brief');
     setSurface('investigations');
   };
 
   const clearHistory = () => {
-    if (!history.length || !window.confirm('Clear all locally stored DepSherpa run history?')) return;
+    if (!history.length || !window.confirm(t('historyClearConfirm'))) return;
     setHistory([]);
     try {
       window.localStorage.removeItem(historyStorageKey);
@@ -292,50 +293,54 @@ export default function Home() {
   const finding = remoteReport?.finding;
   const isNoUpgrade = remoteReport?.decision.status === 'already-installed';
   const canRunLocalUpgrade = remoteReport?.decision.status === 'upgrade' && remoteReport.packageManager === 'npm';
-  const displayPackage = finding?.packageName ?? 'zod';
-  const displayCurrent = remoteReport?.baseline.version ?? (isRemote ? 'unresolved' : '3.23.8');
-  const displayTarget = finding?.targetVersion ?? '4.1.5';
-  const displayedEvidence = isRemote ? remoteEvidence : syntheticEvidence;
-  const completedStages = isRemote ? 2 : Math.max(0, Math.min(step, baseStages.length));
+  const displayPackage = finding?.packageName ?? '';
+  const displayCurrent = remoteReport?.baseline.version ?? (isRemote ? t('unresolved') : '');
+  const displayTarget = finding?.targetVersion ?? '';
+  const completedStages = isRemote ? 2 : 0;
   const cliCommand = remoteReport && canRunLocalUpgrade
     ? `npm run depsherpa -- upgrade /path/to/checkout ${remoteReport.finding.packageName} ${remoteReport.finding.targetVersion} --attempt-repair`
     : '';
 
   const liveUpdate = inspectorState === 'loading'
-    ? 'Reading public GitHub and npm evidence.'
+    ? t('liveLoading')
     : inspectorState === 'error'
       ? inspectorError
       : isRemote
         ? isNoUpgrade
-          ? 'The target version is already resolved. No dependency upgrade is required.'
+          ? t('liveInstalled')
           : canRunLocalUpgrade
-            ? 'Remote evidence is ready. Local execution is still required.'
-            : `Remote evidence is ready. The ${remoteReport.packageManager} local runner is not available yet.`
-        : runState === 'running' && step >= 0
-          ? `Investigation stage ${step + 1} of ${baseStages.length}: ${baseStages[step]?.label}`
-          : runState === 'ready'
-            ? 'Investigation complete. The patch is waiting for human approval.'
-            : runState === 'approved'
-              ? 'Patch approved locally. No external write was performed.'
-              : 'Investigation has not started.';
+            ? t('liveReady')
+            : t('liveUnsupported', { manager: remoteReport.packageManager })
+        : t('liveIdle');
 
   return (
     <main className="app-shell">
-      <aside className="rail" aria-label="Primary navigation">
+      <aside className="rail" aria-label={t('investigations')}>
         <div className="brand-mark" aria-label="DepSherpa"><span className="brand-d">D</span><span className="brand-rule" /></div>
         <nav className="rail-nav">
-          <button className={`rail-action ${surface === 'investigations' ? 'rail-action--active' : ''}`} aria-current={surface === 'investigations' ? 'page' : undefined} aria-label="Investigations" title="Investigations" onClick={() => setSurface('investigations')}><PackageSearch size={19} /></button>
-          <button className="rail-action" aria-label="Policies — coming later" title="Policies — coming later" disabled><ShieldCheck size={19} /></button>
-          <button className={`rail-action ${surface === 'history' ? 'rail-action--active' : ''}`} aria-current={surface === 'history' ? 'page' : undefined} aria-label={`Run history${history.length ? `, ${history.length} saved` : ''}`} title="Run history" onClick={showHistory}><ClockArrowUp size={19} /></button>
+          <button className={`rail-action ${surface === 'investigations' ? 'rail-action--active' : ''}`} aria-current={surface === 'investigations' ? 'page' : undefined} aria-label={t('investigations')} title={t('investigations')} onClick={() => setSurface('investigations')}><PackageSearch size={19} /></button>
+          <button className={`rail-action ${surface === 'history' ? 'rail-action--active' : ''}`} aria-current={surface === 'history' ? 'page' : undefined} aria-label={history.length ? t('historySaved', { count: history.length }) : t('history')} title={t('history')} onClick={showHistory}><ClockArrowUp size={19} /></button>
         </nav>
-        <a className="rail-action rail-github" href="https://github.com/cfngc4594/dep-sherpa" target="_blank" rel="noreferrer" aria-label="DepSherpa on GitHub" title="DepSherpa on GitHub"><CodeXml size={19} /></a>
+        <a className="rail-action rail-github" href="https://github.com/cfngc4594/dep-sherpa" target="_blank" rel="noreferrer" aria-label={t('github')} title={t('github')}><CodeXml size={19} /></a>
       </aside>
 
       <section className="workspace">
         <header className="topbar">
-          <div><p className="wordmark">DepSherpa</p><p className="wordmark-note">dependency change control</p></div>
-          <div className="mode-badge" aria-label={surface === 'history' ? 'Run history is stored on this device' : isRemote ? 'Current execution mode: live read-only evidence' : 'Current execution mode: deterministic demo'}>
-            {surface === 'history' ? <ClockArrowUp size={14} /> : <CircleDot size={14} />}{surface === 'history' ? 'On-device history' : isRemote ? 'Live read-only evidence' : 'Deterministic demo'}
+          <div><p className="wordmark">DepSherpa</p><p className="wordmark-note">{t('brandNote')}</p></div>
+          <div className="topbar-tools">
+            <div className={`mode-badge ${surface !== 'history' && mode === 'local' ? 'mode-badge--local' : ''}`} aria-label={surface === 'history' ? t('modeHistoryHint') : mode === 'local' ? localAvailability.status === 'enabled' ? t('modeLocalBadgeHint') : t('modeLocalBadgeUnavailableHint') : t('modeLiveHint')}>
+              {surface === 'history' ? <ClockArrowUp size={14} /> : mode === 'local' ? <SquareTerminal size={14} /> : <CircleDot size={14} />}{surface === 'history' ? t('modeHistory') : mode === 'local' ? localAvailability.status === 'enabled' ? t('modeLocalBadge') : t('modeLocalBadgeUnavailable') : t('modeLive')}
+            </div>
+            <label className="locale-switch">
+              <span>{t('language')}</span>
+              <select aria-label={t('language')} value={preference} onChange={(event) => setPreference(event.target.value as typeof preference)}>
+                {localePreferences.map((option) => (
+                  <option key={option} value={option}>
+                    {option === 'system' ? t('languageSystem') : option === 'en' ? t('languageEnglish') : t('languageChinese')}
+                  </option>
+                ))}
+              </select>
+            </label>
           </div>
         </header>
 
@@ -343,35 +348,35 @@ export default function Home() {
           <section className="history-view" aria-labelledby="history-title">
             <div className="history-heading">
               <div>
-                <p>LOCAL AUDIT TRAIL</p>
-                <h1 id="history-title">Run history</h1>
-                <span>Successful public-repository inspections saved only in this browser.</span>
+                <p>{t('historyKicker')}</p>
+                <h1 id="history-title">{t('historyTitle')}</h1>
+                <span>{t('historyLead')}</span>
               </div>
-              <button type="button" className="history-clear" onClick={clearHistory} disabled={!history.length}>Clear history</button>
+              <button type="button" className="history-clear" onClick={clearHistory} disabled={!history.length}>{t('historyClear')}</button>
             </div>
 
             {history.length ? (
               <ol className="history-list">
                 {history.map((entry) => (
                   <li key={entry.id} className="history-card">
-                    <button type="button" onClick={() => openHistoryEntry(entry)} aria-label={`Open ${entry.report.repository} ${entry.report.finding.packageName} ${entry.report.finding.targetVersion}`}>
+                    <button type="button" onClick={() => openHistoryEntry(entry)} aria-label={t('historyOpen', { repository: entry.report.repository, package: entry.report.finding.packageName, version: entry.report.finding.targetVersion })}>
                       <div className="history-card-topline">
                         <span>{entry.report.repository}</span>
-                        <time dateTime={entry.createdAt}>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.createdAt))}</time>
+                        <time dateTime={entry.createdAt}>{new Intl.DateTimeFormat(dateLocale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(entry.createdAt))}</time>
                       </div>
                       <div className="history-card-main">
                         <span className="history-monogram">{packageInitial(entry.report.finding.packageName)}</span>
                         <div>
                           <h2>{entry.report.finding.packageName}</h2>
-                          <p>{entry.report.baseline.version ?? 'unresolved'} <ArrowRight size={13} /> {entry.report.finding.targetVersion}</p>
+                          <p>{entry.report.baseline.version ?? t('unresolved')} <ArrowRight size={13} /> {entry.report.finding.targetVersion}</p>
                         </div>
-                        <span className={`history-status history-status--${entry.report.decision.status}`}>{entry.report.decision.status.replaceAll('-', ' ')}</span>
+                        <span className={`history-status history-status--${entry.report.decision.status}`}>{decisionLabel(entry.report.decision.status, t)}</span>
                       </div>
                       <div className="history-card-footer">
                         <span>{entry.report.packageManager}</span>
-                        <span>{entry.report.finding.risk} risk</span>
-                        <span>{entry.report.baseline.source.replace('-', ' ')}</span>
-                        <strong>Open report <ArrowRight size={13} /></strong>
+                        <span>{t('riskValue', { risk: riskLabel(entry.report.finding.risk, t) })}</span>
+                        <span>{sourceLabel(entry.report.baseline.source, t)}</span>
+                        <strong>{t('historyOpenReport')} <ArrowRight size={13} /></strong>
                       </div>
                     </button>
                   </li>
@@ -380,67 +385,76 @@ export default function Home() {
             ) : (
               <div className="history-empty">
                 <ClockArrowUp size={30} />
-                <h2>No saved inspections yet.</h2>
-                <p>Run a successful public repository inspection and it will appear here automatically.</p>
-                <button type="button" className="primary-button" onClick={() => setSurface('investigations')}><PackageSearch size={16} /> Start an inspection</button>
+                <h2>{t('historyEmptyTitle')}</h2>
+                <p>{t('historyEmptyBody')}</p>
+                <button type="button" className="primary-button" onClick={() => setSurface('investigations')}><PackageSearch size={16} /> {t('historyStart')}</button>
               </div>
             )}
           </section>
         ) : (
           <>
+        <ModeSwitch t={t} mode={mode} availability={localAvailability} onChange={setMode} />
+        {mode === 'local' ? (
+          <LocalUpgradeConsole t={t} dateLocale={dateLocale} availability={localAvailability} onCopy={copyText} />
+        ) : (
+          <>
 
         <section className="intake" aria-labelledby="intake-title">
           <div className="intake-copy">
-            <h2 id="intake-title">Inspect a public repository</h2>
-            <p>Read one manifest and verify one npm target. No clone, install, command, or GitHub write occurs here.</p>
+            <h2 id="intake-title">{t('intakeTitle')}</h2>
+            <p>{t('intakeLead')}</p>
           </div>
           <form className="intake-form" onSubmit={submitRemoteInvestigation}>
             <label className="field field--repository">
-              <span>GitHub repository</span>
+              <span>{t('fieldRepository')}</span>
               <input type="url" required maxLength={300} value={form.repositoryUrl} onChange={(event) => setForm((current) => ({ ...current, repositoryUrl: event.target.value }))} placeholder="https://github.com/owner/repository" autoComplete="url" />
             </label>
             <label className="field field--manifest">
-              <span>Manifest path</span>
+              <span>{t('fieldManifest')}</span>
               <input type="text" required maxLength={240} value={form.manifestPath} onChange={(event) => setForm((current) => ({ ...current, manifestPath: event.target.value }))} placeholder="package.json" spellCheck={false} />
             </label>
             <label className="field">
-              <span>Dependency</span>
-              <input type="text" required maxLength={214} value={form.packageName} onChange={(event) => setForm((current) => ({ ...current, packageName: event.target.value }))} placeholder="zod" spellCheck={false} />
+              <span>{t('fieldPackage')}</span>
+              <input type="text" required maxLength={214} value={form.packageName} onChange={(event) => setForm((current) => ({ ...current, packageName: event.target.value }))} placeholder="package-name" spellCheck={false} />
             </label>
             <label className="field">
-              <span>Target version</span>
-              <input type="text" required maxLength={64} value={form.targetVersion} onChange={(event) => setForm((current) => ({ ...current, targetVersion: event.target.value }))} placeholder="4.1.5" spellCheck={false} />
+              <span>{t('fieldVersion')}</span>
+              <input type="text" required maxLength={64} value={form.targetVersion} onChange={(event) => setForm((current) => ({ ...current, targetVersion: event.target.value }))} placeholder="1.2.3" spellCheck={false} />
             </label>
             <button className="inspect-button" type="submit" disabled={inspectorState === 'loading'}>
-              {inspectorState === 'loading' ? <><span className="spinner" /> Reading evidence…</> : <><Search size={16} /> Inspect repository</>}
+              {inspectorState === 'loading' ? <><span className="spinner" /> {t('inspecting')}</> : <><Search size={16} /> {t('inspect')}</>}
             </button>
           </form>
           {inspectorState === 'error' && (
-            <div className="intake-error" role="alert"><TriangleAlert size={17} /><span>{inspectorError}</span><button type="button" onClick={() => setInspectorState('idle')}>Dismiss</button></div>
+            <div className="intake-error" role="alert"><TriangleAlert size={17} /><span>{inspectorError}</span><button type="button" onClick={() => setInspectorState(isRemote ? 'ready' : 'idle')}>{t('dismiss')}</button></div>
           )}
         </section>
 
         <div className="case-heading">
           <div>
-            <p className="repo-path"><CodeXml size={14} /> {isRemote ? `${remoteReport.source.owner} / ${remoteReport.source.name}` : 'acme / checkout-ui'} <span>{isRemote ? 'PUBLIC SOURCE' : 'SYNTHETIC'}</span></p>
-            <h1>{isRemote ? isNoUpgrade ? `${displayPackage}@${displayTarget} is already installed.` : `Investigate ${displayPackage}@${displayTarget} before you install it.` : 'Investigate Zod 4 before it lands.'}</h1>
-            <p className="case-summary">{isRemote ? isNoUpgrade ? `${remoteReport.decision.message} Local checks remain optional.` : `${remoteReport.decision.message} Risk is ${finding?.risk ?? 'unknown'}; repository execution remains local-only.` : 'One breaking change, one isolated repair, and a decision that still belongs to you.'}</p>
+            <p className="repo-path"><CodeXml size={14} /> {isRemote ? `${remoteReport.source.owner} / ${remoteReport.source.name}` : inspectorState === 'loading' ? t('repoLoading') : t('repoWaiting')} <span>{isRemote ? t('badgePublic') : t('badgeWaiting')}</span></p>
+            <h1>{isRemote ? isNoUpgrade ? t('headingInstalled', { package: displayPackage, version: displayTarget }) : t('headingInvestigate', { package: displayPackage, version: displayTarget }) : inspectorState === 'loading' ? t('headingLoading') : t('headingIdle')}</h1>
+            <p className="case-summary">{isRemote ? isNoUpgrade ? t('summaryInstalled', { decision: remoteReport.decision.message }) : t('summaryUpgrade', { decision: remoteReport.decision.message, risk: riskLabel(finding?.risk ?? 'unknown', t) }) : t('summaryIdle')}</p>
           </div>
-          <div className={`decision-state ${isRemote ? 'decision-state--remote' : `decision-state--${runState}`}`} aria-live="polite">
-            {runState === 'approved' && !isRemote ? <CircleCheck size={18} /> : isRemote ? <BookOpenText size={18} /> : <Clock3 size={18} />}
-            <span>{isRemote ? isNoUpgrade ? 'No upgrade required' : 'Evidence ready · execution pending' : runState === 'approved' ? 'Approved locally' : finished ? 'Awaiting approval' : runState === 'running' ? 'Investigation running' : 'Not investigated'}</span>
+          <div className={`decision-state ${isRemote ? 'decision-state--remote' : ''}`} aria-live="polite">
+            {isRemote ? <BookOpenText size={18} /> : inspectorState === 'loading' ? <Search size={18} /> : <Clock3 size={18} />}
+            <span>{isRemote ? isNoUpgrade ? t('statusInstalled') : t('statusReady') : inspectorState === 'loading' ? t('statusLoading') : t('statusIdle')}</span>
           </div>
         </div>
 
         <div className="case-grid">
-          <section className="change-sheet" aria-label="Dependency change packet">
+          <section className="change-sheet" aria-label={t('packetLabel')}>
             <div className="sheet-binding" aria-hidden="true"><span /><span /><span /></div>
             <div className="sheet-header">
-              <div className="package-title"><span className="package-monogram">{packageInitial(displayPackage)}</span><div><p>PACKAGE UNDER REVIEW</p><h2>{displayPackage}</h2></div></div>
-              <div className="version-jump" aria-label={isNoUpgrade ? `Installed version ${displayCurrent} already matches the target` : `Version change from ${displayCurrent} to ${displayTarget}`}><span>{displayCurrent}</span>{isNoUpgrade ? <Check size={18} /> : <ArrowRight size={18} />}<strong>{displayTarget}</strong></div>
+              <div className="package-title"><span className="package-monogram">{displayPackage ? packageInitial(displayPackage) : '—'}</span><div><p>{t('packageUnderReview')}</p><h2>{displayPackage || t('awaitingInspection')}</h2></div></div>
+              {isRemote ? (
+                <div className="version-jump" aria-label={isNoUpgrade ? t('versionMatches', { current: displayCurrent }) : t('versionChange', { current: displayCurrent, target: displayTarget })}><span>{displayCurrent}</span>{isNoUpgrade ? <Check size={18} /> : <ArrowRight size={18} />}<strong>{displayTarget}</strong></div>
+              ) : (
+                <div className="version-jump version-jump--waiting" aria-label={t('noVersionJump')}>—</div>
+              )}
             </div>
 
-            <div className="sheet-tabs" role="tablist" aria-label="Investigation views">
+            <div className="sheet-tabs" role="tablist" aria-label={t('tabList')}>
               {views.map((tab, index) => (
                 <button key={tab} ref={(element) => { tabRefs.current[index] = element; }} id={`tab-${tab}`} role="tab" aria-controls={`panel-${tab}`} aria-selected={view === tab} tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)} onKeyDown={(event) => {
                   if (event.key === 'ArrowRight') { event.preventDefault(); moveTab(index, 1); }
@@ -448,130 +462,128 @@ export default function Home() {
                   if (event.key === 'Home') { event.preventDefault(); setView(views[0]); tabRefs.current[0]?.focus(); }
                   if (event.key === 'End') { event.preventDefault(); setView(views.at(-1)!); tabRefs.current.at(-1)?.focus(); }
                 }}>
-                  {tab === 'brief' ? 'Change brief' : tab === 'evidence' ? 'Evidence' : isRemote ? 'Local handoff' : 'Patch'}
+                  {tab === 'brief' ? t('tabBrief') : tab === 'evidence' ? t('tabEvidence') : t('tabHandoff')}
                 </button>
               ))}
             </div>
 
             <div className="sheet-body" role="tabpanel" id={`panel-${view}`} aria-labelledby={`tab-${view}`} tabIndex={0}>
-              {view === 'brief' && (
+              {!isRemote ? (
+                <div className="packet-waiting">
+                  <Search size={22} />
+                  <h3>{inspectorState === 'loading' ? t('fetchingTitle') : t('waitingTitle')}</h3>
+                  <p>{inspectorState === 'loading' ? t('fetchingBody') : t('waitingBody')}</p>
+                </div>
+              ) : view === 'brief' ? (
                 <div className="brief-view">
-                  <div className="margin-note">{isRemote ? `SHA ${remoteReport.source.manifestSha.slice(0, 7).toUpperCase()}` : 'DS–0147'}<br />{new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date())}</div>
-                  <h3>{isRemote ? isNoUpgrade ? 'The lockfile already matches the requested target.' : finding?.releaseType === 'major' ? 'A major boundary deserves an isolated run.' : 'Resolved dependency evidence gives us the first risk signal.' : 'The version bump is small. The contract change is not.'}</h3>
-                  <p>{isRemote ? `${remoteReport.registry.description ?? displayPackage} ${remoteReport.baseline.message} ${remoteReport.decision.message}` : 'Zod 4 changes the error collection property used by the checkout validator. DepSherpa will reproduce the failure inside a temporary worktree, make only the documented API substitution, then rerun the repository’s own checks.'}</p>
+                  <div className="margin-note">{`SHA ${remoteReport.source.manifestSha.slice(0, 7).toUpperCase()}`}<br />{new Intl.DateTimeFormat(dateLocale, { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date())}</div>
+                  <h3>{isNoUpgrade ? t('briefInstalled') : finding?.releaseType === 'major' ? t('briefMajor') : t('briefSignal')}</h3>
+                  <p>{`${remoteReport.registry.description ?? displayPackage} ${remoteReport.baseline.message} ${remoteReport.decision.message}`}</p>
                   <dl className="risk-ledger">
-                    <div><dt>Surface</dt><dd>{isRemote ? humanizeSection(finding!.section) : '1 call site'}</dd></div>
-                    <div><dt>Package manager</dt><dd>{isRemote ? remoteReport.packageManager : 'pnpm'}</dd></div>
-                    <div><dt>{isRemote ? 'Version source' : 'Network'}</dt><dd>{isRemote ? remoteReport.baseline.source.replace('-', ' ') : 'read evidence only'}</dd></div>
-                    <div><dt>External writes</dt><dd>blocked</dd></div>
+                    <div><dt>{t('ledgerSurface')}</dt><dd>{sectionLabel(finding!.section, t)}</dd></div>
+                    <div><dt>{t('ledgerManager')}</dt><dd>{remoteReport.packageManager}</dd></div>
+                    <div><dt>{t('ledgerSource')}</dt><dd>{sourceLabel(remoteReport.baseline.source, t)}</dd></div>
+                    <div><dt>{t('ledgerWrites')}</dt><dd>{t('writesBlocked')}</dd></div>
                   </dl>
                   <div className="proof-note">
                     <BookOpenText size={17} />
-                    <p><strong>Primary evidence retained</strong><br />{isRemote ? (
+                    <p><strong>{t('evidenceRetained')}</strong><br />
                       <span className="source-links">
-                        <a href={`${remoteReport.source.url}/blob/${remoteReport.source.defaultBranch}/${remoteReport.source.manifestPath}`} target="_blank" rel="noreferrer">GitHub manifest <ExternalLink size={11} /></a>
-                        <a href={`https://www.npmjs.com/package/${remoteReport.finding.packageName}/v/${remoteReport.finding.targetVersion}`} target="_blank" rel="noreferrer">npm version <ExternalLink size={11} /></a>
-                        {remoteReport.releases.notes[0] && <a href={remoteReport.releases.notes[0].url} target="_blank" rel="noreferrer">Release notes <ExternalLink size={11} /></a>}
+                        <a href={`${remoteReport.source.url}/blob/${remoteReport.source.defaultBranch}/${remoteReport.source.manifestPath}`} target="_blank" rel="noreferrer">{t('linkManifest')} <ExternalLink size={11} /></a>
+                        <a href={`https://www.npmjs.com/package/${remoteReport.finding.packageName}/v/${remoteReport.finding.targetVersion}`} target="_blank" rel="noreferrer">{t('linkNpm')} <ExternalLink size={11} /></a>
+                        {remoteReport.releases.notes[0] && <a href={remoteReport.releases.notes[0].url} target="_blank" rel="noreferrer">{t('linkRelease')} <ExternalLink size={11} /></a>}
                       </span>
-                    ) : 'Official migration notes and the repository’s own compiler output will be attached to this packet.'}</p>
+                    </p>
                   </div>
                 </div>
-              )}
-
-              {view === 'evidence' && (
+              ) : view === 'evidence' ? (
                 <div className="evidence-view">
-                  <h3>{isRemote ? `The remote conclusion has ${displayedEvidence.length} receipts.` : 'Every conclusion has a receipt.'}</h3>
+                  <h3>{t('evidenceCount', { count: remoteEvidence.length })}</h3>
                   <div className="evidence-list">
-                    {displayedEvidence.map(([kind, text], index) => {
-                      const visible = isRemote || step > index || finished;
-                      const sourceGap = isRemote && kind === 'RELEASE' && remoteReport.releases.status !== 'found';
-                      return <div key={`${kind}-${text}`} className={`${visible ? 'evidence-row evidence-row--visible' : 'evidence-row'} ${sourceGap ? 'evidence-row--gap' : ''}`}><span>{kind}</span><p>{text}</p>{visible ? sourceGap ? <TriangleAlert size={16} /> : <Check size={16} /> : <span className="evidence-wait">—</span>}</div>;
+                    {remoteEvidence.map(([kind, text]) => {
+                      const sourceGap = kind === 'RELEASE' && remoteReport.releases.status !== 'found';
+                      return <div key={`${kind}-${text}`} className={`evidence-row evidence-row--visible ${sourceGap ? 'evidence-row--gap' : ''}`}><span>{kind}</span><p>{text}</p>{sourceGap ? <TriangleAlert size={16} /> : <Check size={16} />}</div>;
                     })}
                   </div>
-                  {isRemote && (
-                    <section className="release-docket" aria-labelledby="release-docket-title">
-                      <div className="release-docket-heading">
-                        <h4 id="release-docket-title">Release-note docket</h4>
-                        <span>{remoteReport.releases.status === 'found' ? `${remoteReport.releases.notes.length} retained` : 'source gap'}</span>
+                  <section className="release-docket" aria-labelledby="release-docket-title">
+                    <div className="release-docket-heading">
+                      <h4 id="release-docket-title">{t('releaseDocket')}</h4>
+                      <span>{remoteReport.releases.status === 'found' ? t('releaseRetained', { count: remoteReport.releases.notes.length }) : t('releaseGap')}</span>
+                    </div>
+                    {remoteReport.releases.notes.length ? (
+                      <div className="release-note-list">
+                        {remoteReport.releases.notes.map((note) => (
+                          <article key={note.url} className="release-note">
+                            <div className="release-note-meta"><span>{note.tag}</span><time dateTime={note.publishedAt ?? undefined}>{note.publishedAt ? new Intl.DateTimeFormat(dateLocale, { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(note.publishedAt)) : t('dateUnavailable')}</time></div>
+                            <h5><a href={note.url} target="_blank" rel="noreferrer">{note.title}<ExternalLink size={12} /></a></h5>
+                            <p>{note.excerpt}</p>
+                          </article>
+                        ))}
                       </div>
-                      {remoteReport.releases.notes.length ? (
-                        <div className="release-note-list">
-                          {remoteReport.releases.notes.map((note) => (
-                            <article key={note.url} className="release-note">
-                              <div className="release-note-meta"><span>{note.tag}</span><time dateTime={note.publishedAt ?? undefined}>{note.publishedAt ? new Intl.DateTimeFormat('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }).format(new Date(note.publishedAt)) : 'date unavailable'}</time></div>
-                              <h5><a href={note.url} target="_blank" rel="noreferrer">{note.title}<ExternalLink size={12} /></a></h5>
-                              <p>{note.excerpt}</p>
-                            </article>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="release-empty"><TriangleAlert size={16} /><p><strong>No release prose retained.</strong><br />{remoteReport.releases.message} Treat migration impact as unknown until a maintainer supplies a changelog or migration guide.</p></div>
-                      )}
-                    </section>
-                  )}
+                    ) : (
+                      <div className="release-empty"><TriangleAlert size={16} /><p><strong>{t('noReleaseTitle')}</strong><br />{remoteReport.releases.message} {t('noReleaseAdvice')}</p></div>
+                    )}
+                  </section>
                 </div>
-              )}
-
-              {view === 'patch' && (isRemote ? (isNoUpgrade ? (
+              ) : isNoUpgrade ? (
                 <div className="handoff-view">
-                  <div className="patch-heading"><div><p>NO-OP CONCLUSION</p><h3>No dependency change is required.</h3></div><CircleCheck size={24} /></div>
-                  <p>{remoteReport.baseline.message} DepSherpa will not generate an upgrade command or source repair for an unchanged dependency. The discovered project checks may still be run locally as an optional health check.</p>
-                  <div className="check-roster" aria-label="Optional project checks">
+                  <div className="patch-heading"><div><p>{t('noopKicker')}</p><h3>{t('noopTitle')}</h3></div><CircleCheck size={24} /></div>
+                  <p>{remoteReport.baseline.message} {t('noopBody')}</p>
+                  <div className="check-roster" aria-label={t('optionalChecks')}>
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
                   </div>
                 </div>
               ) : !canRunLocalUpgrade ? (
                 <div className="handoff-view">
-                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>Evidence is ready; automated execution is unavailable.</h3></div><TriangleAlert size={24} /></div>
-                  <p>{remoteReport.decision.message} {remoteReport.packageManager === 'npm' ? 'Resolve the installed baseline before running an isolated change.' : `The current isolated runner supports npm repositories; this repository uses ${remoteReport.packageManager}. No misleading command or repair proposal was generated.`}</p>
-                  <div className="check-roster" aria-label="Discovered project checks">
+                  <div className="patch-heading"><div><p>{t('boundaryKicker')}</p><h3>{t('boundaryUnavailable')}</h3></div><TriangleAlert size={24} /></div>
+                  <p>{remoteReport.decision.message} {remoteReport.packageManager === 'npm' ? t('boundaryNpm') : t('boundaryOther', { manager: remoteReport.packageManager })}</p>
+                  <div className="check-roster" aria-label={t('discoveredChecks')}>
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
                   </div>
                 </div>
               ) : (
                 <div className="handoff-view">
-                  <div className="patch-heading"><div><p>LOCAL EXECUTION BOUNDARY</p><h3>Repair stays opt-in and review-only.</h3></div><ShieldCheck size={24} /></div>
-                  <p>Run this only inside a checkout whose scripts you trust. DepSherpa copies committed Git state, blocks install scripts, compares checks, and may repair compiler-attributed Zod migration failures under a three-source-file, twelve-line limit. The source repository remains untouched.</p>
-                  <div className="command-block"><code>{cliCommand}</code><button type="button" onClick={() => copyText(cliCommand, 'Isolated upgrade command copied.')} aria-label="Copy isolated upgrade command"><Copy size={15} /></button></div>
-                  <div className="check-roster" aria-label="Discovered project checks">
+                  <div className="patch-heading"><div><p>{t('boundaryKicker')}</p><h3>{t('boundaryRepair')}</h3></div><ShieldCheck size={24} /></div>
+                  <p>{t('boundaryRepairBody')}</p>
+                  <div className="command-block"><code>{cliCommand}</code><button type="button" onClick={() => copyText(cliCommand, t('commandCopied'))} aria-label={t('copyCommand')}><Copy size={15} /></button></div>
+                  <div className="check-roster" aria-label={t('discoveredChecks')}>
                     {remoteReport.checks.map((check) => <span key={check.name} className={check.available ? 'check-chip check-chip--available' : 'check-chip'}>{check.available ? <Check size={13} /> : <span aria-hidden="true">—</span>}{check.name}</span>)}
                   </div>
                 </div>
-              )) : (
-                <div className="patch-view">
-                  <div className="patch-heading"><div><p>src/lib/validation.ts</p><h3>One bounded repair</h3></div><span className="diff-count">+1 −1</span></div>
-                  <pre aria-label="Proposed source patch"><code><span className="diff-context">{'  if (error instanceof ZodError) {'}</span>{'\n'}<span className="diff-remove">-   return error.errors.map(formatIssue);</span>{'\n'}<span className="diff-add">+   return error.issues.map(formatIssue);</span>{'\n'}<span className="diff-context">{'  }'}</span></code></pre>
-                  <div className="verification-strip"><span><CircleCheck size={16} /> typecheck</span><span><CircleCheck size={16} /> 48 tests</span><span><CircleCheck size={16} /> build</span></div>
-                </div>
-              ))}
+              )}
             </div>
 
             <footer className="sheet-footer">
-              <div className="agent-note"><SquareTerminal size={17} /><span>{isRemote ? 'Remote evidence intake' : 'Strands orchestration'}</span><small>{isRemote ? 'GitHub + registry · no execution' : 'credential-free replay'}</small></div>
+              <div className="agent-note"><SquareTerminal size={17} /><span>{t('agentNote')}</span><small>{t('agentNoteDetail')}</small></div>
               <div className="sheet-actions">
-                {isRemote ? <><button className="reset-button" type="button" onClick={resetDemo}><RotateCcw size={15} /> Use demo</button><button className="primary-button" type="button" onClick={() => copyText(JSON.stringify(remoteReport, null, 2), 'Evidence report copied as JSON.')}><Copy size={16} /> Copy report</button></> : <>
-                  {runState !== 'idle' && <button className="reset-button" onClick={resetDemo} disabled={runState === 'running'}><RotateCcw size={15} /> Reset</button>}
-                  {!finished ? <button className="primary-button" onClick={runInvestigation} disabled={runState === 'running'}>{runState === 'running' ? <><span className="spinner" /> Investigating…</> : <><Play size={16} fill="currentColor" /> Run investigation</>}</button> : <button className="primary-button" onClick={() => setRunState('approved')} disabled={runState === 'approved'}><Check size={17} /> {runState === 'approved' ? 'Patch approved' : 'Approve patch'}</button>}
-                </>}
+                {isRemote ? (
+                  <>
+                    <button className="reset-button" type="button" onClick={clearInspection}><RotateCcw size={15} /> {t('newInspection')}</button>
+                    <button className="primary-button" type="button" onClick={() => copyText(JSON.stringify(remoteReport, null, 2), t('reportCopied'))}><Copy size={16} /> {t('copyReport')}</button>
+                  </>
+                ) : (
+                  <p className="sheet-hint">{t('sheetHint')}</p>
+                )}
               </div>
             </footer>
-            {!isRemote && finished && <button className={`approval-stamp ${runState === 'approved' ? 'approval-stamp--approved' : 'approval-stamp--pending'}`} onClick={() => setRunState('approved')} disabled={runState === 'approved'} aria-label={runState === 'approved' ? 'Patch approved locally' : 'Approve this patch'}>{runState === 'approved' ? 'APPROVED' : 'SIGN OFF'}<br /><span>{runState === 'approved' ? 'LOCAL ONLY' : 'HUMAN REQUIRED'}</span></button>}
           </section>
 
-          <aside className="audit-thread" aria-label="Investigation progress">
-            <div className="audit-heading"><p>Investigation thread</p><span>{completedStages}/{baseStages.length}</span></div>
+          <aside className="audit-thread" aria-label={t('thread')}>
+            <div className="audit-heading"><p>{t('thread')}</p><span>{completedStages}/{stageItems.length}</span></div>
             <ol>
               {stageItems.map((stageItem, index) => {
-                const done = isRemote ? index < 2 : step > index || finished;
-                const active = !isRemote && runState === 'running' && step === index;
+                const done = isRemote && index < 2;
+                const active = !isRemote && inspectorState === 'loading' && index === 0;
                 const StageIcon = stageItem.icon;
-                return <li key={stageItem.label} className={done ? 'stage stage--done' : active ? 'stage stage--active' : 'stage'}><LineMark done={done} active={active} /><div className="stage-icon"><StageIcon size={16} /></div><div><p>{stageItem.label}</p><span>{stageItem.detail}</span></div>{done && <Check size={15} className="stage-check" />}</li>;
+                return <li key={stageItem.label} className={done ? 'stage stage--done' : active ? 'stage stage--active' : 'stage'}><LineMark done={done} active={active} /><div className="stage-icon"><StageIcon size={16} /></div><div><p>{stageItem.label}</p><span>{stageItem.idle}</span></div>{done && <Check size={15} className="stage-check" />}</li>;
               })}
             </ol>
-            <div className="safety-gate"><ShieldCheck size={18} /><div><p>Safety gate is closed</p><span>{isRemote ? 'Public metadata was read. No repository code ran.' : 'No branch, pull request, or message can leave this demo.'}</span></div></div>
+            <div className="safety-gate"><ShieldCheck size={18} /><div><p>{t('safetyClosed')}</p><span>{isRemote ? t('safetyRemote') : t('safetyIdle')}</span></div></div>
           </aside>
         </div>
         <p className="sr-only" aria-live="polite" aria-atomic="true">{liveUpdate}</p>
+          </>
+        )}
         <p className="copy-toast" aria-live="polite">{copyStatus}</p>
           </>
         )}

@@ -33,7 +33,7 @@ describe('report rendering', () => {
       preparation: { ...command, name: 'prepare_dependencies', command: 'npm ci' }, upgrade: { ...command, name: 'apply_upgrade', command: 'npm install zod@4.5.4' },
       baselineResults: [command], baselineSideEffects: [], candidateResults: [command], workspaceChangesAfterChecks: [' M package.json'], unexpectedCandidateChanges: [], comparisons: [{ name: 'test', baseline: 'passed', candidate: 'passed', state: 'passed' }],
       upgradeChangedFiles: ['package.json'], upgradePatch: '-  "zod": "4.5.3"\n+  "zod": "4.5.4"', changedFiles: ['package.json'], patch: '-  "zod": "4.5.3"\n+  "zod": "4.5.4"', verdict: 'ready_for_review', repairSuggestions: [],
-      repair: { requested: false, status: 'not_requested', recipeId: null, rationale: 'Not requested.', evidence: [], changedFiles: [], changedLines: 0, patch: '', verificationResults: [], unexpectedChanges: [], policy: { maxFiles: 3, maxChangedLines: 12, allowedExtensions: ['.ts'], forbiddenPathPatterns: ['tests/'] } }, installScriptsAllowed: false,
+      repair: { requested: false, status: 'not_requested', recipeId: null, proposal: null, proposalSource: null, contextRead: [], releaseEvidence: [], rationale: 'Not requested.', evidence: [], changedFiles: [], changedLines: 0, patch: '', verificationResults: [], unexpectedChanges: [], policy: { maxFiles: 3, maxChangedLines: 12, allowedExtensions: ['.ts'], forbiddenPathPatterns: ['tests/'] } }, installScriptsAllowed: false,
     };
     const markdown = renderIsolatedUpgradeReport(report);
     expect(markdown).toContain('disposable clone');

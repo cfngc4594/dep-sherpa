@@ -1,0 +1,97 @@
+name: DepSherpa
+description: >-
+  Evidence-first dependency upgrade report. Runs the upgrade in a disposable clone,
+  compares the repository's own checks before and after, may propose a bounded repair,
+  and stops at a human decision. Never commits, pushes, or writes to the repository.
+author: cfngc4594
+branding:
+  icon: shield
+  color: orange
+
+inputs:
+  package:
+    description: npm package to upgrade. Leave empty on a pull request to detect the single changed dependency from package.json.
+    required: false
+    default: ''
+  version:
+    description: Exact target version (for example 4.1.5). Required together with `package`; detected from the pull request otherwise.
+    required: false
+    default: ''
+  attempt-repair:
+    description: Allow a recipe or the configured model to propose a bounded source repair that is validated and verified inside the clone.
+    required: false
+    default: 'true'
+  comment:
+    description: Post (or update) one report comment on the pull request. Requires `pull-requests: write`.
+    required: false
+    default: 'true'
+  model:
+    description: Model identifier sent to the OpenAI-compatible endpoint. Defaults to gpt-4.1-mini.
+    required: false
+    default: ''
+  openai-base-url:
+    description: Base URL of an OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter, a self-hosted server). Leave empty for api.openai.com.
+    required: false
+    default: ''
+  openai-api-key:
+    description: API key for the OpenAI-compatible endpoint, passed from a repository secret. Leave empty to run without model proposals (recipes still run).
+    required: false
+    default: ''
+  github-token:
+    description: Token used only for the pull request comment (`pull-requests: write`).
+    required: false
+    default: ${{ github.token }}
+  report-dir:
+    description: Directory inside the workspace that receives report.json, report.md, and candidate.patch.
+    required: false
+    default: depsherpa-report
+  node-version:
+    description: Node.js version used to run DepSherpa.
+    required: false
+    default: '22'
+
+outputs:
+  verdict:
+    description: ready_for_review, repaired_ready_for_review, needs_repair, inconclusive, blocked, or skipped.
+    value: ${{ steps.run.outputs.verdict }}
+  repair-status:
+    description: not_requested, not_needed, unsupported, agent_unavailable, policy_rejected, verified, failed_verification, or not_run.
+    value: ${{ steps.run.outputs.repair-status }}
+  report-dir:
+    description: Directory containing report.json, report.md, and candidate.patch (empty when skipped).
+    value: ${{ steps.run.outputs.report-dir }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Install DepSherpa
+      shell: bash
+      run: npm ci --omit=dev --no-audit --no-fund --prefix "$GITHUB_ACTION_PATH"
+
+    - name: Run DepSherpa in isolation
+      id: run
+      shell: bash
+      env:
+        DEPSHERPA_PACKAGE: ${{ inputs.package }}
+        DEPSHERPA_TARGET_VERSION: ${{ inputs.version }}
+        DEPSHERPA_ATTEMPT_REPAIR: ${{ inputs.attempt-repair }}
+        DEPSHERPA_COMMENT: ${{ inputs.comment }}
+        DEPSHERPA_OUTPUT_DIR: ${{ inputs.report-dir }}
+        DEPSHERPA_MODEL: ${{ inputs.model }}
+        OPENAI_BASE_URL: ${{ inputs.openai-base-url }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: '"$GITHUB_ACTION_PATH/node_modules/.bin/tsx" "$GITHUB_ACTION_PATH/scripts/action.ts"'
+
+    - name: Upload report artifact
+      if: ${{ always() && steps.run.outputs.report-dir != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: depsherpa-report
+        path: ${{ steps.run.outputs.report-dir }}
+        if-no-files-found: ignore

@@ -10,6 +10,7 @@ export interface CommandSpec {
   cwd: string;
   displayCommand?: string;
   timeoutMs?: number;
+  maxOutputBytes?: number | null;
 }
 
 function displayCommand(executable: string, args: string[]): string {
@@ -25,9 +26,12 @@ export async function runCommand(spec: CommandSpec): Promise<CommandResult> {
 
   return await new Promise((resolve) => {
     const detached = process.platform !== 'win32';
+    const childEnvironment: NodeJS.ProcessEnv = { ...process.env, CI: '1', PWD: spec.cwd };
+    delete childEnvironment['OLDPWD'];
+    delete childEnvironment['INIT_CWD'];
     const child = spawn(spec.executable, spec.args, {
       cwd: spec.cwd,
-      env: { ...process.env, CI: '1' },
+      env: childEnvironment,
       detached,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -37,7 +41,8 @@ export async function runCommand(spec: CommandSpec): Promise<CommandResult> {
     let timedOut = false;
     let forceKillTimer: ReturnType<typeof setTimeout> | null = null;
     const append = (chunk: Buffer) => {
-      output = `${output}${chunk.toString()}`.slice(-MAX_OUTPUT);
+      const next = `${output}${chunk.toString()}`;
+      output = spec.maxOutputBytes === null ? next : next.slice(-(spec.maxOutputBytes ?? MAX_OUTPUT));
     };
     child.stdout.on('data', append);
     child.stderr.on('data', append);

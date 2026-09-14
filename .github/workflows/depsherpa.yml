@@ -1,0 +1,41 @@
+# DepSherpa runs on this repository's own dependency pull requests.
+# It only reads the repository, runs the upgrade in a disposable clone on the runner,
+# and reports back. It never commits or pushes.
+name: DepSherpa
+
+on:
+  pull_request:
+    paths:
+      - package.json
+  workflow_dispatch:
+    inputs:
+      package:
+        description: npm package to upgrade
+        required: true
+      version:
+        description: exact target version
+        required: true
+      attempt-repair:
+        description: attempt a controlled repair inside the clone
+        type: choice
+        options: ['true', 'false']
+        default: 'true'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Investigate the upgrade in isolation
+        uses: ./
+        with:
+          package: ${{ inputs.package }}
+          version: ${{ inputs.version }}
+          attempt-repair: ${{ inputs.attempt-repair || 'true' }}
+          # Optional: model proposals for failures no recipe covers.
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          openai-base-url: ${{ vars.OPENAI_BASE_URL }}

@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { investigateWithStrands } from '../src/agent/strands';
 import { investigate } from '../src/core/investigate';
 import { renderIsolatedUpgradeReport, renderMarkdownReport } from '../src/core/report';
 import { upgradeInIsolation } from '../src/core/upgrade';
@@ -8,13 +7,15 @@ function usage(): never {
   console.error(`Usage:
   npm run depsherpa -- inspect <repo> <package> <target> [--run-checks] [--json]
   npm run depsherpa -- upgrade <repo> <package> <target> [--attempt-repair] [--keep-workspace] [--json]
-  npm run depsherpa -- agent   <repo> <package> <target>
+
+Model-backed proposals (optional): set OPENAI_API_KEY, and optionally OPENAI_BASE_URL and
+DEPSHERPA_MODEL, for any OpenAI-compatible endpoint. Without them, recipes still run and
+the report records agent_unavailable for failures no recipe covers.
 
 Examples:
   npm run depsherpa -- inspect fixtures/checkout-ui zod 4.1.5
   npm run depsherpa -- inspect . next 17.0.0 --run-checks
-  npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5 --attempt-repair
-  npm run depsherpa -- agent . zod 4.1.5`);
+  npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5 --attempt-repair`);
   process.exit(1);
 }
 
@@ -38,8 +39,6 @@ if (command === 'inspect') {
     attemptRepair: flags.includes('--attempt-repair'),
   });
   console.log(flags.includes('--json') ? JSON.stringify(report, null, 2) : renderIsolatedUpgradeReport(report));
-} else if (command === 'agent') {
-  console.log(await investigateWithStrands(repoPath, packageName, targetVersion));
 } else {
   usage();
 }

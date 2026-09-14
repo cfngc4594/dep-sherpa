@@ -146,16 +146,65 @@ export interface RepairPolicyLimits {
   forbiddenPathPatterns: string[];
 }
 
+/** A model or recipe may suggest this object, but it has no authority to apply it. */
+export interface RepairEdit {
+  path: string;
+  expectedText: string;
+  replacement: string;
+  rationale: string;
+  diagnostic: string;
+}
+
+export interface RepairProposal {
+  kind: 'recipe' | 'agent';
+  id: string;
+  summary: string;
+  evidence: string[];
+  edits: RepairEdit[];
+}
+
+export interface RepairContextExcerpt {
+  path: string;
+  startLine: number;
+  endLine: number;
+  content: string;
+  diagnostic: string;
+}
+
+export interface RepairInvestigationContext {
+  finding: DependencyFinding;
+  diagnostics: string[];
+  sources: RepairContextExcerpt[];
+  manifest: PackageManifest;
+  checks: ProjectCheck[];
+  releaseEvidence: string[];
+  policy: RepairPolicyLimits;
+}
+
+export type RepairProposalGeneration =
+  | { status: 'generated'; proposal: RepairProposal }
+  | { status: 'no_proposal'; reason: string }
+  | { status: 'unavailable'; reason: string };
+
+export type RepairProposalGenerator = (
+  context: RepairInvestigationContext,
+) => Promise<RepairProposalGeneration>;
+
 export interface RepairAttempt {
   requested: boolean;
   status:
     | 'not_requested'
     | 'not_needed'
     | 'unsupported'
+    | 'agent_unavailable'
     | 'policy_rejected'
     | 'verified'
     | 'failed_verification';
   recipeId: string | null;
+  proposal: RepairProposal | null;
+  proposalSource: 'recipe' | 'agent' | null;
+  contextRead: RepairContextExcerpt[];
+  releaseEvidence: string[];
   rationale: string;
   evidence: string[];
   changedFiles: string[];

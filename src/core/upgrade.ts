@@ -1,7 +1,8 @@
-import { access, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { access, lstat, mkdtemp, open, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import semver from 'semver';
+import { generateRepairProposal } from '../agent/openai';
 import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis';
 import { readManifest } from './manifest';
 import { attemptBoundedRepair, emptyRepairAttempt } from './repair';
@@ -12,6 +13,7 @@ import type {
   CommandResult,
   DependencySection,
   IsolatedUpgradeReport,
+  RepairProposalGenerator,
   RepairSuggestion,
 } from './types';
 
@@ -22,6 +24,7 @@ export interface IsolatedUpgradeOptions {
   timeoutMs?: number;
   keepWorkspace?: boolean;
   attemptRepair?: boolean;
+  proposalGenerator?: RepairProposalGenerator;
 }
 
 async function commandOutput(executable: string, args: string[], cwd: string): Promise<string> {
@@ -145,12 +148,94 @@ async function gitPatch(workspacePath: string): Promise<{ changedFiles: string[]
     args: ['diff', '--no-ext-diff', '--', 'package.json', 'package-lock.json', 'npm-shrinkwrap.json'],
     cwd: workspacePath,
     timeoutMs: 30_000,
+    maxOutputBytes: null,
   });
   if (patchResult.status !== 'passed') throw new Error(patchResult.output || 'Could not capture the upgrade patch.');
   return {
     changedFiles: files ? files.split('\n').filter(Boolean) : [],
     patch: patchResult.output,
   };
+}
+
+function packageDirectory(workspacePath: string, packageName: string): string | null {
+  const parts = packageName.split('/');
+  if (parts.some((part) => !part || part === '.' || part === '..')) return null;
+  if (parts.length > 2 || (parts.length === 2 && !parts[0].startsWith('@'))) return null;
+  const directory = path.resolve(workspacePath, 'node_modules', ...parts);
+  const nodeModules = path.resolve(workspacePath, 'node_modules');
+  return directory.startsWith(`${nodeModules}${path.sep}`) ? directory : null;
+}
+
+function repositoryLabel(value: unknown): string | null {
+  if (typeof value === 'string') return value;
+  if (value && typeof value === 'object' && 'url' in value && typeof value.url === 'string') return value.url;
+  return null;
+}
+
+async function readBoundedPackageText(
+  packageRoot: string,
+  filename: string,
+  maxBytes: number,
+): Promise<{ text: string; truncated: boolean }> {
+  const filePath = path.resolve(packageRoot, filename);
+  const relative = path.relative(packageRoot, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Package evidence path escaped its root.');
+  const metadata = await lstat(filePath);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('Package evidence is not a regular file.');
+  const resolvedRoot = await realpath(packageRoot);
+  const resolvedFile = await realpath(filePath);
+  const resolvedRelative = path.relative(resolvedRoot, resolvedFile);
+  if (resolvedRelative.startsWith('..') || path.isAbsolute(resolvedRelative)) throw new Error('Package evidence resolves outside its root.');
+  const handle = await open(resolvedFile, 'r');
+  try {
+    const buffer = Buffer.alloc(maxBytes + 1);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    return { text: buffer.subarray(0, Math.min(bytesRead, maxBytes)).toString('utf8'), truncated: bytesRead > maxBytes };
+  } finally {
+    await handle.close();
+  }
+}
+
+export async function collectInstalledPackageEvidence(
+  workspacePath: string,
+  packageName: string,
+  targetVersion: string,
+): Promise<string[]> {
+  const directory = packageDirectory(workspacePath, packageName);
+  if (!directory) return [`Requested exact target: ${packageName}@${targetVersion}. Package path was not safe to inspect.`];
+  const evidence = [`Requested exact target: ${packageName}@${targetVersion}.`];
+  try {
+    const manifestSource = await readBoundedPackageText(directory, 'package.json', 128_000);
+    if (manifestSource.truncated) throw new Error('Installed package manifest exceeds the evidence limit.');
+    const manifest = JSON.parse(manifestSource.text) as {
+      name?: unknown; version?: unknown; repository?: unknown; homepage?: unknown; engines?: unknown;
+    };
+    const fields = [
+      typeof manifest.name === 'string' && typeof manifest.version === 'string' ? `installed=${manifest.name}@${manifest.version}` : null,
+      repositoryLabel(manifest.repository) ? `repository=${repositoryLabel(manifest.repository)}` : null,
+      typeof manifest.homepage === 'string' ? `homepage=${manifest.homepage}` : null,
+      manifest.engines ? `engines=${JSON.stringify(manifest.engines)}` : null,
+    ].filter((value): value is string => Boolean(value));
+    evidence.push(`Installed package manifest: ${fields.join('; ') || 'no selected metadata fields were present'}.`);
+  } catch {
+    evidence.push('The installed target package manifest could not be read; the exact npm request remains the available version evidence.');
+  }
+
+  for (const filename of ['MIGRATION.md', 'UPGRADING.md', 'CHANGELOG.md', 'HISTORY.md']) {
+    try {
+      const source = await readBoundedPackageText(directory, filename, 64_000);
+      const lines = source.text.split('\n');
+      const targetMajor = targetVersion.split('.')[0];
+      const index = lines.findIndex((line) => line.includes(targetVersion) || new RegExp(`(?:^|\\D)v?${targetMajor}(?:\\.0)?(?:\\D|$)`, 'i').test(line) || /migrat|breaking/i.test(line));
+      const start = Math.max(0, index >= 0 ? index - 2 : 0);
+      const excerpt = lines.slice(start, start + 14).join('\n').trim().slice(0, 3_500);
+      if (excerpt) evidence.push(`${filename} excerpt from the installed ${packageName}@${targetVersion} package${source.truncated ? ' (source truncated to 64 KiB)' : ''} (untrusted release text):\n${excerpt}`);
+      break;
+    } catch {
+      // Published packages do not consistently include migration notes.
+    }
+  }
+  return evidence;
 }
 
 async function workspaceStatus(workspacePath: string): Promise<string[]> {
@@ -191,6 +276,14 @@ export async function upgradeInIsolation(
       timeoutMs: 60_000,
     });
     if (clone.status !== 'passed') throw new Error(clone.output || 'Could not create the isolated Git clone.');
+    const detachOrigin = await runCommand({
+      name: 'detach_source_origin',
+      executable: 'git',
+      args: ['remote', 'remove', 'origin'],
+      cwd: workspacePath,
+      timeoutMs: 30_000,
+    });
+    if (detachOrigin.status !== 'passed') throw new Error(detachOrigin.output || 'Could not detach the disposable clone from the source repository.');
 
     const { manifest, manifestPath } = await readManifest(workspacePath);
     const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion);
@@ -261,6 +354,9 @@ export async function upgradeInIsolation(
           durationMs: 0,
           output: 'The upgrade was not applied, so the candidate check was not run.',
         }));
+    const candidateManifest = upgrade.status === 'passed'
+      ? (await readManifest(workspacePath)).manifest
+      : manifest;
     const workspaceChangesAfterChecks = upgrade.status === 'passed'
       ? await workspaceStatus(workspacePath)
       : baselineSideEffects;
@@ -269,6 +365,9 @@ export async function upgradeInIsolation(
       (entry) => !expectedChangePaths.has(statusPath(entry)),
     );
     const comparisons = compareCheckResults(baselineResults, candidateResults);
+    const releaseEvidence = upgrade.status === 'passed'
+      ? await collectInstalledPackageEvidence(workspacePath, options.packageName, finding.targetVersion)
+      : [`Requested exact target: ${options.packageName}@${finding.targetVersion}; the upgrade did not complete, so installed-package evidence is unavailable.`];
     const repairSuggestions = comparisons
       .map((comparison) => suggestionFor(
         comparison,
@@ -286,8 +385,11 @@ export async function upgradeInIsolation(
               requested: true,
               workspacePath,
               finding,
+              manifest: candidateManifest,
               checks,
               candidateResults,
+              releaseEvidence,
+              proposalGenerator: options.proposalGenerator ?? generateRepairProposal,
               timeoutMs: options.timeoutMs,
             })
           : emptyRepairAttempt(

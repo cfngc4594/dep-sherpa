@@ -1,71 +1,138 @@
 # Architecture
 
-DepSherpa keeps reasoning, deterministic repository inspection, command execution, and external effects in separate trust zones.
+DepSherpa keeps proposal generation, deterministic policy, isolated execution, and external effects in separate trust zones. This diagram matches the shipped code: a GitHub Action as the primary entry point, a CLI and a web console as secondary entry points, one isolated runner shared by all of them, high-confidence recipe proposal generators, a no-tool model proposal step over any OpenAI-compatible endpoint, deterministic validation, and a human approval gate. The only external write is the Action's report comment.
+
+```text
+Dependabot / Renovate pull request
+→ GitHub Action on the repository's own runner (permissions: contents read · pull-requests write)
+→ Detect the single changed dependency from base vs head package.json
+→ Check out the PR base commit into a separate clone
+→ The same src/core upgradeInIsolation the CLI calls
+→ Upgrade, checks, proposal generation, policy, and verification in a disposable clone
+→ Job summary + report artifact + one PR comment; the reviewer decides
+```
 
 ```mermaid
-flowchart LR
-    U[Maintainer] --> UI[Next.js review workspace]
+flowchart TB
+    U[Maintainer] --> UI[Next.js web console]
     U --> CLI[DepSherpa CLI]
-    UI --> DEMO[Deterministic scenario replay]
-    UI --> API[Read-only evidence endpoint]
-    API --> GH[Public GitHub manifest]
+    PRBOT[Dependabot or Renovate PR] --> ACTION[GitHub Action on the repo's runner]
+    ACTION --> DETECT["Detect one dependency change<br/>base vs head package.json"]
+    DETECT --> BASE[Separate clone of the PR base commit]
+    BASE --> UPGRADE
+
+    UI --> API["POST /api/investigate<br/>read-only evidence"]
+    UI --> LOCALAPI["POST /api/local/upgrade<br/>local harness only"]
+    LOCALAPI --> GATE{Environment gate<br/>Node dev harness · loopback · same-origin}
+    GATE -->|hosted or production| REJECT[403 LOCAL_EXECUTION_UNAVAILABLE]
+    GATE -->|local dev machine| VALIDATE[Strict request validation<br/>Git root · npm name · exact version]
+    VALIDATE --> UPGRADE
+
+    API --> GH[Public GitHub manifest and lockfile]
     API --> NPM[npm version metadata]
     API --> REL[Package GitHub Releases]
-    GH --> CORE
+    GH --> CORE[Deterministic investigation core]
     NPM --> CORE
     REL --> CORE
-    CLI --> ISO[Disposable clone of committed HEAD]
-    ISO --> NPMRUN[npm install with lifecycle scripts blocked]
-    NPMRUN --> CHECKS
+
+    CLI --> INSPECT["inspect<br/>read manifest and optional checks"]
+    CLI --> UPGRADE["upgrade<br/>isolated clone only"]
+
+    INSPECT --> CORE
+
+    UPGRADE --> ISO[Disposable clone of committed HEAD]
+    ISO --> NPMRUN["npm ci / install<br/>lifecycle scripts blocked"]
+    NPMRUN --> CHECKS[Declared lint typecheck test build]
     NPMRUN --> PATCH[Manifest and lockfile patch]
-    CHECKS --> POLICY{Bounded repair policy}
-    POLICY -->|compiler-attributed recipe| REPAIR[Source edit in disposable clone]
-    REPAIR --> VERIFY[Run every declared check again]
+    CHECKS --> CTX["Bounded evidence packet<br/>diagnostics, exact source excerpts,<br/>manifest, checks, package evidence"]
+    CTX --> FAST[High-confidence recipe generator]
+    CTX --> MODEL["OpenAI-compatible model<br/>OPENAI_API_KEY + optional OPENAI_BASE_URL<br/>strict JSON schema, no tools"]
+    FAST --> PROPOSAL[RepairProposal data]
+    MODEL --> PROPOSAL
+    MODEL -.->|unavailable or abstains| REPORT
+    PROPOSAL --> POLICY{Deterministic policy}
+    POLICY -->|exact and allowed| REPAIR[Source edit in disposable clone]
+    POLICY -->|reject| REPORT
+    REPAIR --> VERIFY[Rerun every declared check]
     VERIFY --> REPORT
     PATCH --> REPORT
-    CLI --> CORE[Deterministic investigation core]
-    CLI --> AGENT[Strands Agent]
-    AGENT --> T1[inspect_manifest tool]
-    AGENT --> T2[inspect_project_checks tool]
-    AGENT --> T3[inspect_repair_policy tool]
-    T1 --> CORE
-    T2 --> CORE
-    T3 --> POLICY
     CORE --> MANIFEST[package.json]
-    CORE --> CHECKS[Declared repository checks]
+    CORE --> CHECKS
     CHECKS --> REPORT[Evidence report]
-    DEMO --> REPORT
+    REPORT --> COMMENT["Job summary · artifact · one PR comment<br/>(the Action's only write)"]
     REPORT --> GATE{Human approval}
-    GATE -->|reject| STOP[No external effect]
-    GATE -.->|future, separately authorized| PR[Draft pull request]
+    COMMENT --> GATE
+    GATE -->|reject or ignore| STOP[No external effect]
+    GATE -->|apply the reviewed patch yourself| LOCAL[Reviewer-owned change]
+    GATE -.->|future separately authorized| PR[Draft pull request]
 ```
+
+## Surfaces
+
+| Surface | What it does | What it never does |
+| --- | --- | --- |
+| GitHub Action (`action.yml`, `src/action`) | On a dependency PR (or `workflow_dispatch` inputs), checks out the base commit separately, runs the isolated upgrade with optional repair, writes the job summary and `depsherpa-report` artifact, and creates or updates one PR comment | Commit, push, apply the patch to the checkout, fail the workflow on a verdict, or accept commands/scripts/executables as inputs |
+| Public inspector (`app/`, hosted or local) | Live public GitHub/npm evidence for the repository the user submits; the packet stays empty until then | Clone, install, execute repository scripts, mutate source, or write to GitHub |
+| Local upgrade mode (`app/` + `src/harness`, `npm run dev` only) | Same isolated upgrade, controlled repair, and verification as the CLI, triggered from the browser through a loopback-only API; shows stages, comparison, provenance, diff, and the human gate | Run in the browser, accept commands or paths other than a Git root, exist in a hosted build, touch the source repository, commit, push, or open a PR |
+| CLI `inspect` | Read `package.json`, classify the jump, optionally run declared checks | Change files or create a commit |
+| CLI `upgrade` | Copy committed `HEAD`, apply an exact npm target, compare checks, optionally request and validate a bounded proposal | Touch the source repository, give the model write tools, commit, push, or open a PR |
 
 ## Trust boundaries
 
 ### Deterministic core
 
-`src/core` owns facts that should not depend on a model: manifest parsing, semantic-version classification, check discovery, bounded process execution, and report rendering.
+`src/core` owns facts that should not depend on a model: manifest parsing, semantic-version classification, check discovery, bounded process execution, isolated upgrades, and report rendering.
 
-### Strands orchestration
+### Model proposals
 
-`src/agent/strands.ts` gives the model three read-only tools for manifest facts, declared checks, and the immutable repair policy. The system prompt requires tool evidence, distinguishes facts from hypotheses, and keeps the final human decision explicit. The model cannot execute commands or mutate files through these tools.
+`src/agent/openai.ts` is the only model integration. `resolveModelConfig` picks the endpoint from the environment: `OPENAI_API_KEY` (with optional `OPENAI_BASE_URL` and `DEPSHERPA_MODEL`) selects any OpenAI-compatible provider; nothing configured means no request. The GitHub Actions token is never used as a model credential: GitHub Models, the only zero-configuration inference Actions offered, was retired on 2026-07-30. The generator receives a serialized, bounded evidence packet prepared by the deterministic core, sends it with a strict JSON schema (falling back to `json_object` for providers that reject it), and validates the answer with Zod into either a `RepairProposal` or an abstention. The model has no tools: it cannot browse files, execute commands, mutate files, write to GitHub, commit, push, or open a pull request. Endpoint, credential, or schema failures become `agent_unavailable`; no edit is applied.
+
+### GitHub Action
+
+`action.yml` is a composite action: it installs DepSherpa's runtime dependencies into the action path, runs `scripts/action.ts` with the inputs mapped to environment variables, and uploads `report-dir` as an artifact. `src/action/run.ts` orchestrates one run: `inputs.ts` parses the typed inputs, `context.ts` reads the pull-request payload, `detect.ts` derives the single dependency change from the base and head manifests, `source.ts` fetches the base commit by SHA when the checkout is shallow and clones it into a temporary directory through a short-lived local branch, the core's `upgradeInIsolation` runs against that clone, `comment.ts` renders the compact PR comment and `GITHUB_OUTPUT` assignments, and `github.ts` creates or updates the single marked comment. Verdicts never fail the job.
 
 ### Command runner
 
-The CLI executes only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. DepSherpa spawns npm with `shell: false`, captures bounded output, sets `CI=1`, and terminates the process group when a command exceeds its timeout. npm still executes repository scripts with normal npm semantics, so the first release requires a repository the operator trusts and does not claim OS-level network or filesystem isolation. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, disables npm lifecycle scripts, compares baseline and candidate checks, and captures only manifest/lockfile changes. The temporary clone is removed unless the operator explicitly requests retention.
+The Action, the CLI, and the local web harness execute only four script names already declared by the inspected repository: `lint`, `typecheck`, `test`, and `build`. DepSherpa spawns npm with `shell: false`, captures bounded diagnostic output, sets `CI=1`, removes caller-directory hints from the child environment, and terminates the process group when a command exceeds its timeout. npm still executes repository scripts with normal npm semantics, so the first release requires a repository the operator trusts and does not claim OS-level network or filesystem isolation. The isolated `upgrade` path requires an npm Git root, clones committed `HEAD` without hardlinks, removes the source `origin` before project code runs, disables npm lifecycle scripts, compares baseline and candidate checks, and captures the complete final diff. The temporary clone is removed unless the operator explicitly requests retention.
 
 ### Bounded repair policy
 
-Repair is a separate opt-in capability. The first deterministic recipe consumes an exact TypeScript diagnostic for the documented Zod 3→4 property migration, confirms that the diagnosed tracked source file imports Zod, and edits only the referenced line. A fixed policy caps the proposal at three allowed source files and twelve source lines and rejects tests, fixtures, migrations, configuration, and unexplained file changes. The complete patch is captured before verification; all declared checks run again, and any verification-time patch mutation prevents a verified result. Future Strands-generated proposals must enter through this same policy boundary rather than receiving direct filesystem tools.
+Repair is a separate opt-in capability. Recipes and the model can only generate `RepairProposal` data. Each `RepairEdit` contains a normalized repository-relative path, exact expected text, replacement, rationale, and the exact diagnostic it relies on. The deterministic policy rejects traversal and absolute paths, untracked or symlinked files, binary/invalid UTF-8 content, tests, fixtures, migrations, configuration, unsupported extensions, contexts the generator did not receive, ambiguous or stale expected text, overlapping edits, more than three files, and more than twelve changed lines.
+
+Only after that validation does the core re-read the files and apply exact replacements in the disposable clone. It captures the complete patch before verification, reruns every declared check, compares the patch again afterward, and audits unexpected paths. Only all-green checks with no unexpected change produce `verified`. Recipe generation, model generation, unsupported evidence, policy rejection, failed verification, and successful verification remain separate report states. `verified` describes observed checks, not a guarantee that a model suggestion is semantically correct.
 
 ### Hosted evidence intake
 
 `app/api/investigate/route.ts` accepts a GitHub repository root URL, a path ending in `package.json`, a lowercase npm package name, and an exact target version. It calls only fixed GitHub and npm HTTPS origins, parses the fetched manifest as data, and returns a read-only report. When npm declares a GitHub source repository, it scans the 50 most recent public Releases, semantically matches records inside the requested upgrade range, and retains at most six bounded excerpts with source links. It has no filesystem, command-execution, credential, or mutation capability.
 
+### Local web harness
+
+`vinext dev` serves the Next.js application through the Cloudflare Workers emulator, which cannot spawn processes or read the developer's disk — the same constraint a hosted deployment has. The Vite dev server itself, however, is an ordinary Node process on the developer's machine. `src/harness/vite-plugin.ts` attaches a middleware there (`apply: 'serve'`) in front of the Worker so `/api/local/*` is answered by Node:
+
+- `src/harness/gate.ts` — pure environment gate. Enabled only for an attached Node harness outside `NODE_ENV=production` and not disabled by `DEPSHERPA_LOCAL_HARNESS=0`; request-level checks require a loopback host and socket and a same-origin `Origin`. Workers runtimes are detected and refused.
+- `src/harness/request.ts` — strict parsing of the only accepted fields: absolute Git-root path, npm package name, exact semantic version, `attemptRepair`, `keepWorkspace`. Unknown fields are rejected.
+- `src/harness/repository.ts` — confirms the path exists and is the Git root using the core command runner.
+- `src/harness/api.ts` — a `Request`/`Response` handler with injected dependencies. It calls `investigate` and `upgradeInIsolation` from `src/core` (wired in `src/harness/runtime.ts`), streams `accepted`/`heartbeat`/`report`/`error` events as NDJSON so long runs survive browser timeouts, allows one run at a time, and returns the CLI's `IsolatedUpgradeReport` verbatim together with the CLI's Markdown rendering.
+- `app/api/local/*/route.ts` — the handlers a production build ships. They import only `src/harness/hosted.ts` and the pure gate, never the core, and always reject with `LOCAL_EXECUTION_UNAVAILABLE`. A test asserts that no execution module is reachable from them.
+
+`src/web/` holds the browser side: `local-client.ts` talks only to the same-origin API, `local-report.ts` derives the seven stage states (dependency preparation, baseline checks, upgrade, candidate checks, proposal generation, policy conclusion, verification) from the report rather than inventing them, and `local-upgrade-console.tsx` renders verdict, comparison, diagnostics, provenance, evidence, complete diff, verification, unexpected changes, and the human decision without any apply/commit/push/PR control.
+
 ### External effects
 
-There is no implementation path for branch pushes, pull requests, messages, or account changes. The dotted future edge in the diagram must remain behind a separate approval token if implemented.
+The Action's single report comment is the only external write in the codebase. There is no implementation path for branch pushes, pull requests, patch application, or account changes. The dotted future edge in the diagram must remain behind a separate approval token if implemented.
+
+## Evidence chain
+
+1. Inventory: locate the dependency and classify the requested version jump.
+2. Release evidence: the public inspector retains matching GitHub Releases; the local runner retains the installed target package manifest and a bounded published migration/changelog excerpt when available.
+3. Isolated upgrade: apply the exact target inside a disposable clone of committed `HEAD` (the pull request's base commit in the Action).
+4. Diagnosis and context: compare baseline and candidate checks, retain bounded diagnostics, and read only attributable tracked source excerpts.
+5. Proposal: use a high-confidence recipe when one matches; otherwise, if a model is configured, ask it for structured candidate data. Insufficient evidence or an unavailable endpoint stops safely.
+6. Policy and isolated application: validate every edit deterministically and apply only exact, reproducible replacements in the disposable clone.
+7. Verification and approval: rerun every declared check, reject unexpected changes, emit diagnostics, context summary, rationale, complete diff, and results, then wait. The Action publishes them as a summary, an artifact, and one comment; no source-repository write, commit, push, or pull request is created.
 
 ## Demo flow
 
-The hosted web experience offers two labeled modes. The live path reads real public manifest and npm metadata but stops before code execution. The synthetic Zod v3-to-v4 replay demonstrates the later execution, repair, and approval states without AWS credentials. Simulated command results are never presented as measurements from the live repository.
+Open a Dependabot-style pull request that bumps one dependency in a repository with the workflow from the README. The Action detects the change, checks out the base commit, runs the isolated upgrade on the runner, and leaves a comment with the baseline-versus-candidate table, diagnostics, repair provenance (recipe, model, or none), the candidate patch, and the human decision; the job summary and the `depsherpa-report` artifact hold the complete report. With an `openai-api-key` secret configured, non-recipe failures may receive a model proposal; without it the report records `agent_unavailable` and the recipes still run.
+
+The same run is reproducible offline: `npm run demo:repair` performs the real Zod recipe demonstration from the terminal, and the web console started with `npm run dev` can run it from the browser in **Local isolated upgrade** mode. The generic non-recipe loop is covered by the Monaco-style test named `validates, applies, and verifies a non-recipe Agent proposal`; it injects structured model output so the complete policy/application/verification story can run without any network access.

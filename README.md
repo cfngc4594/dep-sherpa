@@ -1,95 +1,127 @@
 # DepSherpa
 
-DepSherpa is an evidence-first agent for dependency upgrades. It turns a version bump into a change-control packet: what changes, why it is risky, which repository checks exist, what actually ran, and which human decision is still required.
+DepSherpa is a GitHub Action that turns a dependency-bump pull request into a change-control packet. On the runner it upgrades the dependency inside a disposable clone of the base commit, compares the repository's own `lint`, `typecheck`, `test`, and `build` before and after, may propose a bounded source repair, verifies it, and reports back — as a job summary, an artifact, and one pull-request comment. It never commits, pushes, or writes to the repository; the human decision stays with the reviewer.
 
-The project is being built for the **Agents for Humans Hackathon — Professional Agents track**. It uses the [Strands Agents TypeScript SDK](https://strandsagents.com/) for model-driven orchestration while keeping a credential-free deterministic path for judging and local development.
+**License:** [MIT](LICENSE) · Devpost copy: [docs/DEVPOST.md](docs/DEVPOST.md) · Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · Security: [SECURITY.md](SECURITY.md)
 
-## Why this is different
+## Quick start
 
-Most dependency bots stop after changing a version. DepSherpa separates six responsibilities and records evidence for each one:
+Add one workflow. No API key is required for the report itself: the isolated upgrade, the check comparison, the diagnostics, and the deterministic repair recipes run without any model. An OpenAI-compatible key (one repository secret) additionally enables model-generated repair proposals for failures no recipe covers.
 
-1. inventory the repository;
-2. retain relevant release evidence;
-3. prepare an isolated upgrade;
-4. diagnose the repository's own failures;
-5. propose a bounded repair;
-6. verify and wait for explicit human approval.
+```yaml
+# .github/workflows/depsherpa.yml
+name: DepSherpa
+on:
+  pull_request:
+    paths: [package.json]
+permissions:
+  contents: read
+  pull-requests: write   # one report comment
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cfngc4594/dep-sherpa@main
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}   # optional; omit to run recipes only
+```
 
-No GitHub write access is implemented in this version. The web workspace clearly separates live read-only metadata from synthetic execution. The local CLI can apply a candidate upgrade only inside a disposable clone of the repository's committed state.
+When Dependabot or Renovate opens a PR that changes one dependency in `package.json`, DepSherpa reads the change from the base and head manifests, checks out the base commit in a separate clone, and runs the upgrade there. The PR receives a comment like:
 
-## Use the hosted inspector
+> **DepSherpa · `zod` 3.23.8 → 4.1.5 — repaired · ready for review**
+> baseline vs candidate check table · diagnostics · repair: verified, source: recipe · candidate patch · *human decision required*
 
-The web workspace has two deliberately separate paths:
+The complete Markdown report is written to the job summary, and `report.json`, `report.md`, and `candidate.patch` are uploaded as the `depsherpa-report` artifact.
 
-- **Live read-only evidence** accepts a public GitHub repository URL, a `package.json` path, an npm dependency, and an exact target version. It reads the manifest plus a committed `package-lock.json` or text `bun.lock`, reports the exact resolved baseline when available, confirms the target through npm, distinguishes real upgrades from no-op requests, matches up to six GitHub Releases from the package's declared source repository, discovers repository checks, and produces a copyable JSON report.
-- **Deterministic demo** replays the complete Zod migration story, including a simulated failure, bounded repair, verification, and local approval gate.
+### Manual runs
 
-The hosted path never clones a repository, installs packages, executes project scripts, changes source, or writes to GitHub. Private repositories are intentionally unsupported until an explicit authentication design is approved.
+Add `workflow_dispatch` inputs to investigate any upgrade against the current branch:
 
-## Run the workspace locally
+```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      package: { description: npm package, required: true }
+      version: { description: exact target version, required: true }
+# ...
+      - uses: cfngc4594/dep-sherpa@main
+        with:
+          package: ${{ inputs.package }}
+          version: ${{ inputs.version }}
+```
 
-Requirements: Node.js 22.13 or newer.
+### Inputs
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `package` | detected from the PR | npm package to upgrade |
+| `version` | detected from the PR | exact target version; ranges and dist-tags are rejected |
+| `attempt-repair` | `true` | allow a recipe or the configured model to propose a bounded repair, validated and verified inside the clone |
+| `comment` | `true` | create or update one PR comment (needs `pull-requests: write`) |
+| `model` | `gpt-4.1-mini` | model identifier sent to the endpoint |
+| `openai-api-key` | empty | API key from a secret; enables model proposals |
+| `openai-base-url` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter, self-hosted) |
+| `github-token` | `${{ github.token }}` | used only for the comment |
+| `report-dir` | `depsherpa-report` | where report files are written and uploaded from |
+
+Outputs: `verdict` (`ready_for_review`, `repaired_ready_for_review`, `needs_repair`, `inconclusive`, `blocked`, or `skipped`), `repair-status`, `report-dir`.
+
+### Model configuration
+
+The model is only asked for a proposal when the upgrade introduces a failure that no recipe covers. It receives a bounded packet — diagnostics, exact source excerpts, the manifest, declared checks, policy limits, and installed-package version evidence — and can only answer with structured data. Deterministic policy decides whether that data may be applied inside the clone.
+
+- **Any OpenAI-compatible endpoint:** pass `openai-api-key` (from a repository secret) and optionally `openai-base-url` and `model`; most hosted and self-hosted providers speak this format. Locally, set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `DEPSHERPA_MODEL`.
+- **No model:** the report records `agent_unavailable`, keeps the diagnostics and source context for a human, and applies nothing. Recipes such as the Zod 3→4 `ZodError.errors → .issues` migration still run.
+- **Why no zero-configuration option:** GitHub Models — the `GITHUB_TOKEN`-authenticated inference GitHub Actions used to offer — was retired on 2026-07-30 and its endpoint answers HTTP 410. DepSherpa therefore never treats the workflow token as a model credential.
+
+## What the report contains
+
+| Stage | Evidence |
+| --- | --- |
+| Inventory | `package.json` plus the exact lockfile baseline |
+| Isolated change | Disposable clone of the base commit; source repository untouched |
+| Diagnosis | Baseline vs candidate checks; introduced failures separated from pre-existing ones; first actionable diagnostic retained |
+| Repair | A recipe or the model emits a structured candidate; deterministic policy alone may apply it in the clone |
+| Verification | Every declared check reruns after the repair; unexpected file changes are audited |
+| Gate | Human review. `verified` describes observed checks, not correctness; nothing is applied, committed, or pushed |
+
+Rejecting or ignoring the packet has no effect on the repository.
+
+## Security boundaries
+
+- The Action runs on your runner and executes your repository's own `npm ci` and declared scripts inside a clone of your own commit — the same trust you already extend to CI. It is a disposable-clone workflow, not an operating-system sandbox.
+- The only GitHub write is one PR comment. There is no code path that commits, pushes, opens a pull request, or applies a patch to the checkout.
+- Isolated installs run with npm lifecycle scripts disabled; the clone's `origin` is removed before repository code runs.
+- Repair is capped at three tracked source files and twelve changed lines. Tests, fixtures, migrations, configuration, traversal paths, untracked files, unread context, ambiguous matches, and suppressions or process/network/filesystem capabilities in replacements are rejected.
+- The model has no tools. It sees a bounded, untrusted evidence packet and answers with JSON that is schema-validated and then policy-validated. Missing or failing model access degrades to `agent_unavailable`, never to an unvalidated edit.
+- `github-token` is used only for the comment; `openai-api-key` is only ever sent to the endpoint you configured. Neither reaches the report.
+
+See [SECURITY.md](SECURITY.md) for the full mutation policy.
+
+## Run it locally (CLI)
+
+The Action is a thin wrapper around the same core, so everything can be reproduced on a laptop with Node.js 22.13+, Git, and npm:
 
 ```bash
 npm install
-npm run dev
+npm run depsherpa -- inspect /path/to/repo zod 4.1.5            # dry run: classify the jump, discover checks
+npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5         # isolated upgrade, baseline vs candidate
+npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5 --attempt-repair --json
+npm run demo:repair                                              # complete Zod 3→4 repair packet, no credentials needed
 ```
 
-Open the local URL printed by the command. Use the public-repository form for real metadata or press **Run investigation** in the synthetic packet to inspect the complete staged workflow.
+`upgrade` requires an npm repository whose path is the Git root and whose `package-lock.json` is committed. Use `--keep-workspace` only to inspect the disposable clone manually. Set `OPENAI_API_KEY` (and optionally `OPENAI_BASE_URL`, `DEPSHERPA_MODEL`) to enable model proposals locally.
 
-## Inspect a real repository
-
-The dry-run command reads `package.json`, classifies the requested version jump, discovers standard verification scripts, and prints a Markdown report:
+The generic, non-recipe closed loop is covered by a test that injects a structured model proposal and exercises policy, isolated application, and verification without any network:
 
 ```bash
-npm run depsherpa -- inspect /path/to/repo zod 4.1.5
+npm test -- --run src/core/repair.test.ts -t "validates, applies, and verifies a non-recipe Agent proposal"
 ```
 
-Execute only the repository's already-declared `lint`, `typecheck`, `test`, and `build` scripts:
+## Web console (secondary)
 
-```bash
-npm run depsherpa -- inspect /path/to/repo zod 4.1.5 --run-checks
-```
-
-Machine-readable output:
-
-```bash
-npm run depsherpa -- inspect /path/to/repo zod 4.1.5 --json
-```
-
-## Run an upgrade in isolation
-
-The isolated runner copies the repository's committed `HEAD` into a disposable directory, installs dependencies with lifecycle scripts disabled, records a baseline, applies the exact target, and reruns the declared checks. It returns the manifest/lockfile patch, distinguishes newly introduced failures from failures that already existed, and retains the first actionable diagnostic with a check-specific next step:
-
-```bash
-npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5
-```
-
-Add `--attempt-repair` to authorize a policy-bounded repair inside the disposable clone. The first recipe handles the documented Zod 3→4 `ZodError.errors` to `.issues` migration only when TypeScript identifies the exact tracked source line. It may change at most three source files and twelve source lines, rejects tests, fixtures, migrations, configuration, untracked paths, and unexplained edits, then reruns every declared check:
-
-```bash
-npm run depsherpa -- upgrade /path/to/npm-repo zod 4.1.5 --attempt-repair
-```
-
-Use `--json` for a machine-readable decision packet. Use `--keep-workspace` only when you need to inspect the disposable checkout manually. Uncommitted source changes are listed in the report but intentionally excluded from the clone.
-
-The first isolated-runner release requires an npm repository whose supplied path is the Git root and whose `package-lock.json` is committed. It never commits, pushes, opens a pull request, or copies the patch back to the source repository. npm executes the repository's declared checks normally, so use it only with code and scripts you trust; this release does not provide an operating-system sandbox.
-
-Reproduce the complete Zod failure, one-line repair, and green verification packet with:
-
-```bash
-npm run demo:repair
-```
-
-## Run with Strands Agents
-
-Strands uses Amazon Bedrock by default. Configure the standard AWS credential chain and model access, then run:
-
-```bash
-npm run depsherpa -- agent /path/to/repo zod 4.1.5
-```
-
-The agent receives three intentionally read-only tools: `inspect_manifest`, `inspect_project_checks`, and `inspect_repair_policy`. Command execution, file mutation, and external writes are not available directly to the model; deterministic CLI policy owns any repair inside the disposable clone.
+`npm run dev` also serves a web console. Its **public read-only investigation** mode reads a public GitHub `package.json`, verifies a target on npm, and retains matching GitHub Releases without executing anything, so it is safe to host. Its **local isolated upgrade** mode is attached only inside the dev server on your own machine and drives the same core through a loopback-only API; hosted deployments answer `LOCAL_EXECUTION_UNAVAILABLE`. Details are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The GitHub Action is the primary way to use DepSherpa.
 
 ## Verification
 
@@ -99,31 +131,33 @@ npm test
 npm run build
 ```
 
-The evaluation suite covers major, minor, patch, peer, dev, optional, missing, and invalid dependency cases, plus report safety invariants.
+The suites cover the deterministic core (major/minor/patch/peer/dev/optional/missing/invalid cases and report invariants), the bounded repair policy, the OpenAI-compatible generator (strict schema, fallback, failure modes, configuration resolution), the Action (input validation, PR detection, shallow-checkout base preparation, summary/outputs/artifact files, comment create/update), and the web console's environment gate.
 
 ## Repository map
 
 ```text
-app/                    interactive web demonstration
-app/api/investigate/    read-only GitHub and npm evidence endpoint
-scripts/depsherpa.ts    command-line entry point
-src/agent/              Strands orchestration adapter
-src/core/               local and remote analysis, check runner, report generation
-src/evals/              deterministic evaluation scenarios
-fixtures/               synthetic judging fixture
-docs/ARCHITECTURE.md    system diagram and trust boundaries
+action.yml                GitHub Action definition (composite)
+.github/workflows/        this repository's own DepSherpa workflow
+scripts/action.ts         Action entry point
+scripts/depsherpa.ts      command-line entry point
+scripts/demo-repair.ts    isolated Zod repair demonstration
+src/core/                 deterministic core: analysis, isolated runner, repair policy, reports
+src/agent/openai.ts       OpenAI-compatible proposal generator (no tools)
+src/action/               Action orchestration: inputs, PR detection, base checkout, comment
+src/harness/, src/web/    local web console harness and UI
+app/                      web console (public inspector + local mode)
+fixtures/                 synthetic fixtures
+docs/                     architecture and Devpost copy
 ```
 
 ## Current boundaries
 
-- npm-compatible JavaScript/TypeScript projects only.
-- Hosted version classification prefers exact `package-lock.json` and text `bun.lock` evidence. A manifest range is never presented as the installed version; unsupported or missing lockfiles are reported as unresolved.
-- The hosted inspector reads only public repositories and uses unauthenticated upstream APIs, so normal GitHub and npm rate limits apply.
-- Exact npm version verification, semver-range GitHub Release matching, isolated npm upgrades, and one compiler-attributed Zod migration repair are live. Repository changelog fallback and model-proposed general repairs remain future work.
+- npm-compatible JavaScript/TypeScript projects only; the repository root must contain `package.json` and a committed `package-lock.json`.
+- One dependency per pull request. Grouped Dependabot/Renovate updates are reported as skipped; pass `package` and `version` explicitly to investigate one of them.
+- Workflows triggered by Dependabot receive a read-only `GITHUB_TOKEN`; the summary and artifact are still produced, and the comment reports as failed unless you grant write access through a different token.
+- Every npm upgrade can enter the investigation and controlled-proposal flow. That does not mean every failure can be repaired: the model may be unavailable or abstain, evidence may be insufficient, policy may reject a proposal, and verification may fail.
 - No branch push, pull request creation, messaging, or other external write occurs.
-
-See [SECURITY.md](SECURITY.md) for the mutation policy and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the orchestration design.
 
 ## License
 
-MIT
+[MIT](LICENSE). Copyright (c) 2026 cfngc4594.

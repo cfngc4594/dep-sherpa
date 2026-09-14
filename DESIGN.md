@@ -190,7 +190,7 @@ Paper uses an asymmetrical binding edge with gently curved outer corners. Contro
 
 ### Navigation
 
-The current destination uses a filled vermilion icon control and `aria-current`. Future destinations stay visible only when explicitly disabled and labeled “coming later.” On mobile the rail becomes a sticky top strip in normal flow.
+The current destination uses a filled vermilion icon control and `aria-current`. The rail only exposes shipped destinations: investigations, on-device history, and the GitHub repository. On mobile the rail becomes a sticky top strip in normal flow.
 
 ### Evidence Tabs
 
@@ -198,7 +198,7 @@ Tabs sit on the document rule and use vermilion only for the selected underline.
 
 ### Approval Stamp
 
-The pending stamp uses a dashed vermilion outline and the words “SIGN OFF / HUMAN REQUIRED.” The same button transitions to a double green “APPROVED / LOCAL ONLY” stamp after the human acts. The stamp never implies a remote write.
+The pending stamp uses a dashed vermilion outline and the words “SIGN OFF / HUMAN REQUIRED.” The same control transitions to a double green “APPROVED / LOCAL ONLY” stamp after the human acts. The stamp never implies a remote write. The current inspector does not show this stamp: the browser packet waits for live evidence, and approval stays with the local CLI report.
 
 ### Investigation Thread
 
