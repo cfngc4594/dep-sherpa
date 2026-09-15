@@ -19,17 +19,14 @@ import type {
  * Configuration is environment-only so it works identically from the CLI and
  * from GitHub Actions:
  *
- * - `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, `OPENAI_MODEL` / `DEPSHERPA_MODEL`,
- *   and optional `DEPSHERPA_DEFAULT_*` fallbacks) → any
- *   OpenAI-compatible provider.
- * - Nothing configured → proposals are simply unavailable; recipes still work.
+ * - `OPENAI_API_KEY` and `OPENAI_MODEL` (or `DEPSHERPA_MODEL`) are required for proposals;
+ *   `OPENAI_BASE_URL` is optional and defaults to the official OpenAI API when omitted.
+ * - Missing key or model → proposals are unavailable; recipes still work.
  *
  * There is deliberately no GitHub-token path: GitHub Models, the only
  * zero-configuration inference GitHub Actions ever offered, was retired on
  * 2026-07-30 and its endpoint now answers HTTP 410.
  */
-
-export const defaultOpenAIModel = 'gpt-4.1-mini';
 
 export type ModelProvider = 'openai-compatible' | 'none';
 
@@ -39,23 +36,27 @@ export type ModelConfig =
 
 export function resolveModelConfig(env: Record<string, string | undefined> = process.env): ModelConfig {
   const apiKey = env.OPENAI_API_KEY?.trim() || undefined;
-  const baseURL = coalesceConfiguredText(env.OPENAI_BASE_URL, env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL);
-  const model =
-    coalesceConfiguredText(env.OPENAI_MODEL, env.DEPSHERPA_MODEL, env.DEPSHERPA_DEFAULT_OPENAI_MODEL) ??
-    defaultOpenAIModel;
-  if (apiKey || baseURL) {
-    // Some self-hosted OpenAI-compatible servers accept any key; the SDK still requires one.
+  const model = coalesceConfiguredText(env.OPENAI_MODEL, env.DEPSHERPA_MODEL);
+  const baseURL = coalesceConfiguredText(env.OPENAI_BASE_URL);
+  if (!apiKey) {
     return {
-      provider: 'openai-compatible',
-      baseURL,
-      apiKey: apiKey ?? 'no-key-required',
-      model,
+      provider: 'none',
+      reason:
+        'No model is configured. Set OPENAI_API_KEY and OPENAI_MODEL (optionally OPENAI_BASE_URL for a non-OpenAI endpoint) to enable model proposals; recipes run without them.',
+    };
+  }
+  if (!model) {
+    return {
+      provider: 'none',
+      reason:
+        'No model identifier is configured. Set OPENAI_MODEL (or the action `model` input) together with OPENAI_API_KEY; recipes run without a model.',
     };
   }
   return {
-    provider: 'none',
-    reason:
-      'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL, OPENAI_MODEL, and DEPSHERPA_DEFAULT_* fallbacks) to enable model proposals; recipes run without one.',
+    provider: 'openai-compatible',
+    baseURL,
+    apiKey,
+    model,
   };
 }
 

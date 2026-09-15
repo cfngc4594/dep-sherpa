@@ -2,7 +2,6 @@ import { describe, expect, it, jest } from '@jest/globals';
 import type { RepairInvestigationContext } from '../../src/core/types.js';
 import {
   createOpenAIProposalGenerator,
-  defaultOpenAIModel,
   describeModelConfig,
   redactProviderErrorDetail,
   repairGenerationJsonSchema,
@@ -89,37 +88,27 @@ function fakeFetch(
 }
 
 describe('model configuration', () => {
-  it('prefers OPENAI_MODEL and explicit URLs over DEPSHERPA defaults', () => {
+  it('requires OPENAI_API_KEY and OPENAI_MODEL; OPENAI_BASE_URL is optional', () => {
     expect(
       resolveModelConfig({
         OPENAI_API_KEY: 'sk-test',
-        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
-        OPENAI_BASE_URL: 'https://override.example',
-        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+        OPENAI_BASE_URL: 'https://llm.example/v1',
         OPENAI_MODEL: 'override-model',
       }),
     ).toMatchObject({
-      baseURL: 'https://override.example',
+      baseURL: 'https://llm.example/v1',
       model: 'override-model',
     });
     expect(
       resolveModelConfig({
         OPENAI_API_KEY: 'sk-test',
-        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
-        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+        OPENAI_MODEL: 'gpt-5.4-mini',
       }),
-    ).toMatchObject({
-      baseURL: 'https://default.example',
-      model: 'default-model',
-    });
-  });
-
-  it('uses any OpenAI-compatible endpoint from OPENAI_API_KEY and OPENAI_BASE_URL', () => {
-    expect(resolveModelConfig({ OPENAI_API_KEY: 'sk-test' })).toEqual({
+    ).toEqual({
       provider: 'openai-compatible',
       baseURL: undefined,
       apiKey: 'sk-test',
-      model: defaultOpenAIModel,
+      model: 'gpt-5.4-mini',
     });
     expect(
       resolveModelConfig({
@@ -135,17 +124,24 @@ describe('model configuration', () => {
     });
   });
 
-  it('accepts a key-less self-hosted endpoint', () => {
-    expect(
-      resolveModelConfig({ OPENAI_BASE_URL: 'http://localhost:11434/v1', DEPSHERPA_MODEL: 'llama3' }),
-    ).toMatchObject({ provider: 'openai-compatible', apiKey: 'no-key-required', model: 'llama3' });
+  it('rejects base URL or model without the paired credential fields', () => {
+    expect(resolveModelConfig({ OPENAI_BASE_URL: 'http://localhost:11434/v1', OPENAI_MODEL: 'llama3' }).provider).toBe(
+      'none',
+    );
+    expect(resolveModelConfig({ OPENAI_API_KEY: 'sk-test' }).provider).toBe('none');
+    expect(resolveModelConfig({ OPENAI_MODEL: 'llama3' }).provider).toBe('none');
   });
 
   it('never turns the GitHub Actions token into a model credential (GitHub Models is retired)', () => {
     expect(resolveModelConfig({ GITHUB_ACTIONS: 'true', GITHUB_TOKEN: 'ghs_token' }).provider).toBe('none');
     expect(
-      resolveModelConfig({ GITHUB_ACTIONS: 'true', GITHUB_TOKEN: 'ghs_token', OPENAI_API_KEY: 'sk-test' }),
-    ).toMatchObject({ provider: 'openai-compatible', apiKey: 'sk-test' });
+      resolveModelConfig({
+        GITHUB_ACTIONS: 'true',
+        GITHUB_TOKEN: 'ghs_token',
+        OPENAI_API_KEY: 'sk-test',
+        OPENAI_MODEL: 'gpt-5.4-mini',
+      }),
+    ).toMatchObject({ provider: 'openai-compatible', apiKey: 'sk-test', model: 'gpt-5.4-mini' });
   });
 
   it('fails closed with an actionable reason when nothing is configured', () => {
@@ -155,12 +151,10 @@ describe('model configuration', () => {
     expect(describeModelConfig(config)).toBe('no model configured');
     expect(
       describeModelConfig(
-        resolveModelConfig({ OPENAI_API_KEY: 'k', OPENAI_BASE_URL: compatibleBaseUrl, DEPSHERPA_MODEL: 'qwen' }),
+        resolveModelConfig({ OPENAI_API_KEY: 'k', OPENAI_BASE_URL: compatibleBaseUrl, OPENAI_MODEL: 'qwen' }),
       ),
     ).toBe('qwen @ llm.example');
-    expect(describeModelConfig(resolveModelConfig({ OPENAI_API_KEY: 'k' }))).toBe(
-      `${defaultOpenAIModel} @ api.openai.com`,
-    );
+    expect(resolveModelConfig({ OPENAI_API_KEY: 'k' }).provider).toBe('none');
   });
 });
 
