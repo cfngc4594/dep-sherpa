@@ -154903,7 +154903,7 @@ The candidate ran only in a disposable clone. Recipe output and model output are
 
 const sourcePathPattern = /([A-Za-z0-9_./@-]+\.(?:tsx?|jsx?))(?:\((\d+),\d+\)|:(\d+):\d+)/;
 function normalizeRepoRelativePath(value) {
-    let normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
     if (pathLooksAbsolute(normalized))
         return null;
     if (!normalized || normalized.split('/').includes('..'))
