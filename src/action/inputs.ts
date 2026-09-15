@@ -85,9 +85,7 @@ export function parseFailOn(value: string | undefined): ReadonlySet<FailOnVerdic
     const token = part.trim();
     if (!token) continue;
     if (!allowed.has(token)) {
-      throw new Error(
-        `fail-on contains unknown verdict "${token}"; expected one of: ${FAIL_ON_VERDICTS.join(', ')}.`,
-      );
+      throw new Error(`fail-on contains unknown verdict "${token}"; expected one of: ${FAIL_ON_VERDICTS.join(', ')}.`);
     }
     result.add(token as FailOnVerdict);
   }
