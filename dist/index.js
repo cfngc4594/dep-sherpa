@@ -154684,9 +154684,16 @@ Use only exact text present in an allowed source excerpt; expectedText must be c
 Do not propose tests, fixtures, migrations, configuration files, new files, commands, or edits outside the supplied excerpts.
 Do not claim the proposal is correct or verified. If the evidence is insufficient, answer with outcome "no_proposal" and a reason.
 Answer only with a JSON object of the form {"outcome": "proposal" | "no_proposal", "reason": string | null, "proposal": {"id", "summary", "evidence": string[], "edits": [{"path", "expectedText", "replacement", "rationale", "diagnostic"}]} | null}.`;
-function boundedDetail(error) {
+/** Never echo API keys or provider echo-backs of credentials into reports or PR comments. */
+function redactProviderErrorDetail(error) {
     const message = error instanceof Error ? error.message : String(error);
-    return message.replace(/\s+/g, ' ').slice(0, 300);
+    const redacted = message
+        .replace(/\bsk-[A-Za-z0-9_-]{4,}\S*/gi, 'sk-[REDACTED]')
+        .replace(/Incorrect API key provided:[^.]*\.?/gi, 'Incorrect API key provided.');
+    return redacted.replace(/\s+/g, ' ').slice(0, 300);
+}
+function boundedDetail(error) {
+    return redactProviderErrorDetail(error);
 }
 async function requestCompletion(client, params) {
     try {
@@ -154729,6 +154736,12 @@ function createOpenAIProposalGenerator(config, options = {}) {
             });
         }
         catch (error) {
+            if (error instanceof APIError && error.status === 401) {
+                return {
+                    status: 'unavailable',
+                    reason: `The model endpoint (${describeModelConfig(config)}) rejected the API key (HTTP 401). Check OPENAI_API_KEY.`,
+                };
+            }
             return {
                 status: 'unavailable',
                 reason: `The model endpoint (${describeModelConfig(config)}) was unavailable (${boundedDetail(error)}).`,
