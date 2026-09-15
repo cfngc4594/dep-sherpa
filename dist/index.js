@@ -154704,15 +154704,18 @@ async function requestCompletion(client, params) {
                 json_schema: { name: 'repair_generation', strict: true, schema: repairGenerationJsonSchema() },
             },
         });
-        return completion.choices[0]?.message?.content ?? null;
+        return completionMessageContent(completion);
     }
     catch (error) {
         // Providers without json_schema support answer 400; fall back to json_object and rely on Zod.
         if (!(error instanceof APIError) || error.status !== 400)
             throw error;
         const completion = await client.chat.completions.create({ ...params, response_format: { type: 'json_object' } });
-        return completion.choices[0]?.message?.content ?? null;
+        return completionMessageContent(completion);
     }
+}
+function completionMessageContent(completion) {
+    return completion.choices?.[0]?.message?.content ?? null;
 }
 function createOpenAIProposalGenerator(config, options = {}) {
     return async (context) => {
