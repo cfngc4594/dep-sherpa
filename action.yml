@@ -51,21 +51,20 @@ inputs:
     default: depsherpa-report
   model:
     description: >-
-      Model identifier sent to the OpenAI-compatible endpoint. Leave empty to use OPENAI_MODEL /
-      DEPSHERPA_MODEL / DEPSHERPA_DEFAULT_OPENAI_MODEL from the runner environment, or gpt-4.1-mini.
+      Model identifier (required together with `openai-api-key` for model proposals).
+      Leave empty to use OPENAI_MODEL or DEPSHERPA_MODEL from the runner environment.
     required: false
     default: ''
   openai-base-url:
     description: >-
-      Base URL of an OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter,
-      a self-hosted server). Leave empty to use OPENAI_BASE_URL / DEPSHERPA_DEFAULT_OPENAI_BASE_URL
-      from the runner environment, or api.openai.com when none are set.
+      Optional base URL of an OpenAI-compatible endpoint. Leave empty for the official OpenAI API
+      or OPENAI_BASE_URL from the runner environment.
     required: false
     default: ''
   openai-api-key:
     description: >-
-      API key for the OpenAI-compatible endpoint, passed from a repository secret.
-      Leave empty to run without model proposals (recipes still run).
+      API key (required together with `model` for model proposals). Leave empty to run without
+      model proposals (recipes still run).
     required: false
     default: ''
   github-token:

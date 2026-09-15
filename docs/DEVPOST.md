@@ -21,7 +21,7 @@ Judges can reproduce the isolated upgrade and the complete Zod repair without an
 **Public demo repository:** [depsherpa-zod-demo](https://github.com/cfngc4594/depsherpa-zod-demo)
 
 - [PR #1 — Zod 3.23.8 → 4.1.5 (deterministic recipe repair)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1): DepSherpa comment shows `repaired · ready for review` with a verified recipe patch.
-- [PR #2 — Zod 3.23.8 → 4.6.5 (generic / model path)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2): when no recipe covers the failure, the report may include a bounded model proposal. The demo workflow uses repository **variables** (`OPENAI_BASE_URL`, `OPENAI_MODEL`) as defaults and optional **secrets** with the same names to override them; only `OPENAI_API_KEY` is required as a secret.
+- [PR #2 — Zod 3.23.8 → 4.6.5 (generic / model path)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2): when no recipe covers the failure, the report may include a bounded model proposal. The demo workflow requires `OPENAI_API_KEY` (secret) and `OPENAI_MODEL` (variable); `OPENAI_BASE_URL` (variable) is optional and defaults to the official OpenAI API when omitted.
 
 ## Built With
 

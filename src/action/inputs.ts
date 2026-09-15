@@ -132,17 +132,8 @@ export function modelEnvironment(
   inputs: ActionInputs,
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
-  const baseURL = coalesceConfiguredText(
-    inputs.openaiBaseUrl,
-    env.OPENAI_BASE_URL,
-    env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL,
-  );
-  const model = coalesceConfiguredText(
-    inputs.model,
-    env.OPENAI_MODEL,
-    env.DEPSHERPA_MODEL,
-    env.DEPSHERPA_DEFAULT_OPENAI_MODEL,
-  );
+  const baseURL = coalesceConfiguredText(inputs.openaiBaseUrl, env.OPENAI_BASE_URL);
+  const model = coalesceConfiguredText(inputs.model, env.OPENAI_MODEL, env.DEPSHERPA_MODEL);
   return {
     ...env,
     ...(inputs.openaiApiKey ? { OPENAI_API_KEY: inputs.openaiApiKey } : {}),

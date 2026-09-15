@@ -218,29 +218,15 @@ describe('action inputs and context', () => {
     expect(
       modelEnvironment(
         { ...defaultInputs, openaiApiKey: 'sk-input' },
-        {
-          DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
-          OPENAI_BASE_URL: 'https://override.example',
-          DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
-          OPENAI_MODEL: 'override-model',
-        },
+        { OPENAI_BASE_URL: 'https://override.example', OPENAI_MODEL: 'override-model' },
       ),
     ).toMatchObject({
       OPENAI_BASE_URL: 'https://override.example',
       OPENAI_MODEL: 'override-model',
       DEPSHERPA_MODEL: 'override-model',
     });
-    expect(
-      modelEnvironment(
-        { ...defaultInputs, openaiApiKey: 'sk-input' },
-        {
-          DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
-          DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
-        },
-      ),
-    ).toMatchObject({
-      OPENAI_BASE_URL: 'https://default.example',
-      OPENAI_MODEL: 'default-model',
+    expect(modelEnvironment({ ...defaultInputs, openaiApiKey: 'sk-input' }, {})).toMatchObject({
+      OPENAI_API_KEY: 'sk-input',
     });
   });
 

@@ -60,9 +60,9 @@ on:
 | `version` | detected from the PR | exact target version; ranges and dist-tags are rejected |
 | `attempt-repair` | `true` | allow a recipe or the configured model to propose a bounded repair, validated and verified inside the clone |
 | `comment` | `true` | create or update one PR comment (needs `pull-requests: write`) |
-| `model` | `gpt-4.1-mini` | model identifier sent to the endpoint |
-| `openai-api-key` | empty | API key from a secret; enables model proposals |
-| `openai-base-url` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter, self-hosted) |
+| `model` | empty | model identifier; required with `openai-api-key` for model proposals |
+| `openai-api-key` | empty | API key; required with `model` for model proposals |
+| `openai-base-url` | empty | optional; defaults to the official OpenAI API |
 | `github-token` | `${{ github.token }}` | used only for the comment |
 | `report-dir` | `depsherpa-report` | where report files are written and uploaded from |
 | `upload-artifact` | `true` | upload `report.json`, `report.md`, and `candidate.patch` as the `depsherpa-report` artifact |
@@ -74,7 +74,7 @@ Outputs: `verdict` (`ready_for_review`, `repaired_ready_for_review`, `needs_repa
 
 The model is only asked for a proposal when the upgrade introduces a failure that no recipe covers. It receives a bounded packet — diagnostics, exact source excerpts, the manifest, declared checks, policy limits, and installed-package version evidence — and can only answer with structured data. Deterministic policy decides whether that data may be applied inside the clone.
 
-- **Any OpenAI-compatible endpoint:** pass `openai-api-key` (from a repository secret) and optionally `openai-base-url` and `model`. Empty inputs fall back to runner `OPENAI_BASE_URL` / `OPENAI_MODEL` (or `DEPSHERPA_DEFAULT_*` defaults); workflow inputs and secrets override those. Locally, set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` (or `DEPSHERPA_MODEL`).
+- **Model proposals:** require `openai-api-key` and `model` (or runner `OPENAI_API_KEY` + `OPENAI_MODEL` / `DEPSHERPA_MODEL`). `openai-base-url` / `OPENAI_BASE_URL` is optional and defaults to the official OpenAI API when omitted.
 - **No model:** the report records `agent_unavailable`, keeps the diagnostics and source context for a human, and applies nothing. Recipes such as the Zod 3→4 `ZodError.errors → .issues` migration still run.
 - **Why no zero-configuration option:** GitHub Models — the `GITHUB_TOKEN`-authenticated inference GitHub Actions used to offer — was retired on 2026-07-30 and its endpoint answers HTTP 410. DepSherpa therefore never treats the workflow token as a model credential.
 
