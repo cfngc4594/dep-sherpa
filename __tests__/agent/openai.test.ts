@@ -4,6 +4,7 @@ import {
   createOpenAIProposalGenerator,
   defaultOpenAIModel,
   describeModelConfig,
+  redactProviderErrorDetail,
   repairGenerationJsonSchema,
   resolveModelConfig,
   stripSchemaConstraints,
@@ -221,6 +222,16 @@ describe('OpenAI-compatible proposal generator', () => {
     await expect(missingProposal(context)).resolves.toMatchObject({ status: 'no_proposal' });
   });
 
+  it('never copies API key material from provider errors into reasons', () => {
+    const detail = redactProviderErrorDetail(
+      new Error(
+        '401 Incorrect API key provided: sk-d8b46abcdefghijklmnopqrstuvwxyz7786. You can find your API key at https://platform.openai.com/account/api-keys.',
+      ),
+    );
+    expect(detail).not.toContain('sk-d8b46');
+    expect(detail).toContain('Incorrect API key provided.');
+  });
+
   it('reports endpoint failures as unavailable instead of throwing', async () => {
     const { impl } = fakeFetch(
       () =>
@@ -236,6 +247,8 @@ describe('OpenAI-compatible proposal generator', () => {
     const result = await generate(context);
     expect(result.status).toBe('unavailable');
     expect(result.status === 'unavailable' && result.reason).toContain('llm.example');
+    expect(result.status === 'unavailable' && result.reason).toContain('HTTP 401');
+    expect(result.status === 'unavailable' && result.reason).not.toContain('bad credentials');
   });
 
   it('is unavailable without any configuration and performs no request', async () => {
