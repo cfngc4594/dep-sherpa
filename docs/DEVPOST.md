@@ -21,7 +21,7 @@ Judges can reproduce the isolated upgrade and the complete Zod repair without an
 **Public demo repository:** [depsherpa-zod-demo](https://github.com/cfngc4594/depsherpa-zod-demo)
 
 - [PR #1 — Zod 3.23.8 → 4.1.5 (deterministic recipe repair)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1): DepSherpa comment shows `repaired · ready for review` with a verified recipe patch.
-- [PR #2 — Zod 3.23.8 → 4.6.5 (generic / model path)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2): when no recipe covers the failure, the report may include a bounded model proposal. The demo workflow requires `OPENAI_API_KEY` (secret) and `OPENAI_MODEL` (variable); `OPENAI_BASE_URL` (variable) is optional and defaults to the official OpenAI API when omitted.
+- [PR #2 — Zod 3.23.8 → 4.6.5 (generic / model path)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2): Zod 4 removed `deepPartial()` and no recipe covers it, so the repair came from the model. The comment shows `repaired · ready for review` with `verified` model proposal `zod-4-deep-partial-repair` — the proposal passed deterministic policy validation and every declared repository check inside the disposable clone, and still waits for human approval. The demo workflow requires `OPENAI_API_KEY` (secret) and `OPENAI_MODEL` (variable); `OPENAI_BASE_URL` (variable) is optional and defaults to the official OpenAI API when omitted. This run used a third-party OpenAI-compatible gateway, where the base URL must include the API path prefix (for example `https://host/v1`), since the SDK appends `/chat/completions` verbatim.
 
 ## Built With
 
@@ -55,7 +55,7 @@ Then exercise the public paths:
    Add the workflow from the README to any npm repository and open a pull request that bumps one dependency in `package.json`; the PR receives the report comment and the run uploads the `depsherpa-report` artifact. Locally, `npm test -- __tests__/action` runs the same orchestration against a shallow Dependabot-style checkout.
 
 2. **Live GitHub Action on the demo repo**  
-   Open [depsherpa-zod-demo PR #1](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1) for the recipe path, or [PR #2](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2) for a major jump where a model proposal may appear. Each pull request has a DepSherpa report comment, job summary, and artifact.
+   Open [depsherpa-zod-demo PR #1](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1) for the deterministic recipe path, or [PR #2](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2) for a major jump repaired by a verified model proposal. Each pull request has a DepSherpa report comment, job summary, and artifact.
 
 3. **Isolated upgrade + deterministic repair (local)**  
    `npm run demo:repair`  
@@ -65,7 +65,7 @@ Then exercise the public paths:
    `npm run depsherpa -- inspect . zod 4.1.5`  
    Confirm the Markdown packet names the version jump, discovered checks, and the human gate.
 
-Optional: set `OPENAI_API_KEY` (and `OPENAI_BASE_URL` for a compatible provider) before `upgrade --attempt-repair` to see a model proposal for a failure no recipe covers. The model cannot write files.
+Optional: set `OPENAI_API_KEY` and `OPENAI_MODEL` (plus `OPENAI_BASE_URL`, including its API path prefix such as `/v1`, for a compatible provider) before `upgrade --attempt-repair` to see a model proposal for a failure no recipe covers. The model cannot write files.
 
 What to look for: an evidence chain, isolation before mutation, a three-file / twelve-line repair cap, and a human decision that the Action cannot take for you. What not to expect: a commit, a push, an automatic merge, or a general auto-fixer.
 
