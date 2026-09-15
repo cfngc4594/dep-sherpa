@@ -4,7 +4,7 @@ import path from 'node:path';
 import semver from 'semver';
 import { generateRepairProposal } from '../agent/openai.js';
 import { analyzeUpgrade, inferPackageManager, listChecks } from './analysis.js';
-import { readManifest } from './manifest.js';
+import { readInstalledVersion, readManifest } from './manifest.js';
 import { attemptBoundedRepair, emptyRepairAttempt } from './repair.js';
 import { runChecks, runCommand } from './runner.js';
 import type {
@@ -309,7 +309,12 @@ export async function upgradeInIsolation(options: IsolatedUpgradeOptions): Promi
       throw new Error(detachOrigin.output || 'Could not detach the disposable clone from the source repository.');
 
     const { manifest, manifestPath } = await readManifest(workspacePath);
-    const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion);
+    const finding = analyzeUpgrade(
+      manifest,
+      options.packageName,
+      options.targetVersion,
+      await readInstalledVersion(workspacePath, options.packageName),
+    );
     if (finding.currentVersion && !semver.gt(finding.targetVersion, finding.currentVersion)) {
       throw new Error(
         `The target ${finding.targetVersion} must be newer than the committed version ${finding.currentVersion}.`,

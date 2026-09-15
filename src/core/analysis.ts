@@ -41,11 +41,13 @@ export function analyzeUpgrade(
   manifest: PackageManifest,
   packageName: string,
   targetVersion: string,
+  installedVersion: string | null = null,
 ): DependencyFinding {
   const located = locateDependency(manifest, packageName);
   if (!located) throw new Error(`${packageName} is not declared in package.json`);
 
-  const current = semver.minVersion(located.range)?.version ?? null;
+  const installed = installedVersion ? semver.valid(installedVersion) : null;
+  const current = installed ?? semver.minVersion(located.range)?.version ?? null;
   const target = semver.valid(targetVersion);
   if (!target) throw new Error(`Target version is not valid semver: ${targetVersion}`);
 
@@ -53,11 +55,18 @@ export function analyzeUpgrade(
   let risk: UpgradeRisk = 'unknown';
   const reasons: string[] = [];
 
+  if (installed) {
+    reasons.push(`The baseline ${installed} is the version resolved in package-lock.json.`);
+  }
   if (!current) {
     reasons.push('The declared range could not be reduced to a concrete semantic version.');
   } else if (semver.lte(target, current)) {
     risk = 'low';
-    reasons.push('The target does not exceed the minimum declared version.');
+    reasons.push(
+      installed
+        ? 'The target does not exceed the installed version.'
+        : 'The target does not exceed the minimum declared version.',
+    );
   } else if (releaseType === 'major' || releaseType === 'premajor') {
     risk = 'high';
     reasons.push('The target crosses a major-version boundary.');

@@ -155228,23 +155228,29 @@ function listChecks(manifest) {
         available: Boolean(scripts[name]),
     }));
 }
-function analyzeUpgrade(manifest, packageName, targetVersion) {
+function analyzeUpgrade(manifest, packageName, targetVersion, installedVersion = null) {
     const located = locateDependency(manifest, packageName);
     if (!located)
         throw new Error(`${packageName} is not declared in package.json`);
-    const current = semver.minVersion(located.range)?.version ?? null;
+    const installed = installedVersion ? semver.valid(installedVersion) : null;
+    const current = installed ?? semver.minVersion(located.range)?.version ?? null;
     const target = semver.valid(targetVersion);
     if (!target)
         throw new Error(`Target version is not valid semver: ${targetVersion}`);
     const releaseType = current ? semver.diff(current, target) : null;
     let risk = 'unknown';
     const reasons = [];
+    if (installed) {
+        reasons.push(`The baseline ${installed} is the version resolved in package-lock.json.`);
+    }
     if (!current) {
         reasons.push('The declared range could not be reduced to a concrete semantic version.');
     }
     else if (semver.lte(target, current)) {
         risk = 'low';
-        reasons.push('The target does not exceed the minimum declared version.');
+        reasons.push(installed
+            ? 'The target does not exceed the installed version.'
+            : 'The target does not exceed the minimum declared version.');
     }
     else if (releaseType === 'major' || releaseType === 'premajor') {
         risk = 'high';
@@ -155286,6 +155292,29 @@ async function readManifest(repoPath) {
     const source = await readFile(manifestPath, 'utf8');
     const manifest = JSON.parse(source);
     return { manifest, manifestPath };
+}
+/** Resolves the version npm actually installs for a top-level dependency from a lockfile (v1, v2, or v3). */
+function versionFromPackageLock(lockfile, packageName) {
+    const lock = lockfile;
+    const modern = lock?.packages?.[`node_modules/${packageName}`]?.version;
+    if (typeof modern === 'string')
+        return modern;
+    const legacy = lock?.dependencies?.[packageName]?.version;
+    return typeof legacy === 'string' ? legacy : null;
+}
+/**
+ * Reads the installed baseline of a dependency from the repository's committed
+ * `package-lock.json`. Returns null when the lockfile is missing, unreadable, or
+ * does not pin the package, so callers fall back to the declared range.
+ */
+async function readInstalledVersion(repoPath, packageName) {
+    try {
+        const source = await readFile(path$3.resolve(repoPath, 'package-lock.json'), 'utf8');
+        return versionFromPackageLock(JSON.parse(source), packageName);
+    }
+    catch {
+        return null;
+    }
 }
 
 const policy = {
@@ -156150,7 +156179,7 @@ async function upgradeInIsolation(options) {
         if (detachOrigin.status !== 'passed')
             throw new Error(detachOrigin.output || 'Could not detach the disposable clone from the source repository.');
         const { manifest, manifestPath } = await readManifest(workspacePath);
-        const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion);
+        const finding = analyzeUpgrade(manifest, options.packageName, options.targetVersion, await readInstalledVersion(workspacePath, options.packageName));
         if (finding.currentVersion && !semver.gt(finding.targetVersion, finding.currentVersion)) {
             throw new Error(`The target ${finding.targetVersion} must be newer than the committed version ${finding.currentVersion}.`);
         }
