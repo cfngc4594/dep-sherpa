@@ -1,6 +1,7 @@
 import { APIError, OpenAI } from 'openai';
 import type { ChatCompletionCreateParamsNonStreaming } from 'openai/resources/chat/completions';
 import { z } from 'zod';
+import { coalesceConfiguredText } from '../action/inputs.js';
 import type {
   RepairInvestigationContext,
   RepairProposal,
@@ -18,7 +19,8 @@ import type {
  * Configuration is environment-only so it works identically from the CLI and
  * from GitHub Actions:
  *
- * - `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, `DEPSHERPA_MODEL`) → any
+ * - `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, `OPENAI_MODEL` / `DEPSHERPA_MODEL`,
+ *   and optional `DEPSHERPA_DEFAULT_*` fallbacks) → any
  *   OpenAI-compatible provider.
  * - Nothing configured → proposals are simply unavailable; recipes still work.
  *
@@ -36,22 +38,24 @@ export type ModelConfig =
   | { provider: 'openai-compatible'; baseURL: string | undefined; apiKey: string; model: string };
 
 export function resolveModelConfig(env: Record<string, string | undefined> = process.env): ModelConfig {
-  const model = env.DEPSHERPA_MODEL?.trim() || undefined;
   const apiKey = env.OPENAI_API_KEY?.trim() || undefined;
-  const baseURL = env.OPENAI_BASE_URL?.trim() || undefined;
+  const baseURL = coalesceConfiguredText(env.OPENAI_BASE_URL, env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL);
+  const model =
+    coalesceConfiguredText(env.OPENAI_MODEL, env.DEPSHERPA_MODEL, env.DEPSHERPA_DEFAULT_OPENAI_MODEL) ??
+    defaultOpenAIModel;
   if (apiKey || baseURL) {
     // Some self-hosted OpenAI-compatible servers accept any key; the SDK still requires one.
     return {
       provider: 'openai-compatible',
       baseURL,
       apiKey: apiKey ?? 'no-key-required',
-      model: model ?? defaultOpenAIModel,
+      model,
     };
   }
   return {
     provider: 'none',
     reason:
-      'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL and DEPSHERPA_MODEL) to enable model proposals; recipes run without one.',
+      'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL, OPENAI_MODEL, and DEPSHERPA_DEFAULT_* fallbacks) to enable model proposals; recipes run without one.',
   };
 }
 

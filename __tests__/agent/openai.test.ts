@@ -89,6 +89,31 @@ function fakeFetch(
 }
 
 describe('model configuration', () => {
+  it('prefers OPENAI_MODEL and explicit URLs over DEPSHERPA defaults', () => {
+    expect(
+      resolveModelConfig({
+        OPENAI_API_KEY: 'sk-test',
+        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
+        OPENAI_BASE_URL: 'https://override.example',
+        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+        OPENAI_MODEL: 'override-model',
+      }),
+    ).toMatchObject({
+      baseURL: 'https://override.example',
+      model: 'override-model',
+    });
+    expect(
+      resolveModelConfig({
+        OPENAI_API_KEY: 'sk-test',
+        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
+        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+      }),
+    ).toMatchObject({
+      baseURL: 'https://default.example',
+      model: 'default-model',
+    });
+  });
+
   it('uses any OpenAI-compatible endpoint from OPENAI_API_KEY and OPENAI_BASE_URL', () => {
     expect(resolveModelConfig({ OPENAI_API_KEY: 'sk-test' })).toEqual({
       provider: 'openai-compatible',

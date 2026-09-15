@@ -210,10 +210,35 @@ describe('action inputs and context', () => {
     expect(env).toMatchObject({
       OPENAI_API_KEY: 'sk-input',
       OPENAI_BASE_URL: 'https://llm.example/v1',
+      OPENAI_MODEL: 'qwen',
       DEPSHERPA_MODEL: 'qwen',
       PATH: '/usr/bin',
     });
     expect(modelEnvironment(defaultInputs, { OPENAI_API_KEY: 'sk-env' })).toEqual({ OPENAI_API_KEY: 'sk-env' });
+    expect(
+      modelEnvironment(
+        { ...defaultInputs, openaiApiKey: 'sk-input' },
+        {
+          DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
+          OPENAI_BASE_URL: 'https://override.example',
+          DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+          OPENAI_MODEL: 'override-model',
+        },
+      ),
+    ).toMatchObject({
+      OPENAI_BASE_URL: 'https://override.example',
+      OPENAI_MODEL: 'override-model',
+      DEPSHERPA_MODEL: 'override-model',
+    });
+    expect(
+      modelEnvironment({ ...defaultInputs, openaiApiKey: 'sk-input' }, {
+        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
+        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+      }),
+    ).toMatchObject({
+      OPENAI_BASE_URL: 'https://default.example',
+      OPENAI_MODEL: 'default-model',
+    });
   });
 
   it('reads the pull request context only from a well-formed event payload', () => {
