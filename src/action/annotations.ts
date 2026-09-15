@@ -11,7 +11,7 @@ export interface WorkflowDiagnosticAnnotation {
 const sourcePathPattern = /([A-Za-z0-9_./@-]+\.(?:tsx?|jsx?))(?:\((\d+),\d+\)|:(\d+):\d+)/;
 
 function normalizeRepoRelativePath(value: string): string | null {
-  let normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+  const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
   if (pathLooksAbsolute(normalized)) return null;
   if (!normalized || normalized.split('/').includes('..')) return null;
   return normalized;
