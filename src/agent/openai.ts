@@ -22,6 +22,7 @@ import type {
  * - `OPENAI_API_KEY` and `OPENAI_MODEL` (or `DEPSHERPA_MODEL`) are required for proposals;
  *   `OPENAI_BASE_URL` is optional and defaults to the official OpenAI API when omitted.
  * - Missing key or model → proposals are unavailable; recipes still work.
+ * - Structured completions fall back json_schema → json_object → plain chat when gateways return empty bodies.
  *
  * There is deliberately no GitHub-token path: GitHub Models, the only
  * zero-configuration inference GitHub Actions ever offered, was retired on
@@ -138,9 +139,17 @@ async function requestCompletion(
   client: OpenAI,
   params: Omit<ChatCompletionCreateParamsNonStreaming, 'response_format'>,
 ): Promise<string | null> {
+  const requestPlain = async (): Promise<string | null> => {
+    const completion = await client.chat.completions.create(params);
+    return completionMessageContent(completion);
+  };
+
   const requestJsonObject = async (): Promise<string | null> => {
     const completion = await client.chat.completions.create({ ...params, response_format: { type: 'json_object' } });
-    return completionMessageContent(completion);
+    const content = completionMessageContent(completion);
+    if (content?.trim()) return content;
+    // Some gateways ignore response_format and still return empty bodies; try an unconstrained completion.
+    return requestPlain();
   };
 
   try {

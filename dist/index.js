@@ -154693,9 +154693,17 @@ function boundedDetail(error) {
     return redactProviderErrorDetail(error);
 }
 async function requestCompletion(client, params) {
+    const requestPlain = async () => {
+        const completion = await client.chat.completions.create(params);
+        return completionMessageContent(completion);
+    };
     const requestJsonObject = async () => {
         const completion = await client.chat.completions.create({ ...params, response_format: { type: 'json_object' } });
-        return completionMessageContent(completion);
+        const content = completionMessageContent(completion);
+        if (content?.trim())
+            return content;
+        // Some gateways ignore response_format and still return empty bodies; try an unconstrained completion.
+        return requestPlain();
     };
     try {
         const completion = await client.chat.completions.create({
