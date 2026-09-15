@@ -231,10 +231,13 @@ describe('action inputs and context', () => {
       DEPSHERPA_MODEL: 'override-model',
     });
     expect(
-      modelEnvironment({ ...defaultInputs, openaiApiKey: 'sk-input' }, {
-        DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
-        DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
-      }),
+      modelEnvironment(
+        { ...defaultInputs, openaiApiKey: 'sk-input' },
+        {
+          DEPSHERPA_DEFAULT_OPENAI_BASE_URL: 'https://default.example',
+          DEPSHERPA_DEFAULT_OPENAI_MODEL: 'default-model',
+        },
+      ),
     ).toMatchObject({
       OPENAI_BASE_URL: 'https://default.example',
       OPENAI_MODEL: 'default-model',
