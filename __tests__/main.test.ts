@@ -124,6 +124,34 @@ describe('main.ts', () => {
     expect(core.setFailed).not.toHaveBeenCalled();
   });
 
+  it('fails the step when the verdict is listed in fail-on', async () => {
+    core.getInput.mockImplementation((name: string) =>
+      name === 'fail-on' ? 'needs_repair,blocked' : (inputs[name] ?? ''),
+    );
+    const report = sampleIsolatedUpgradeReport({ verdict: 'needs_repair' });
+    runAction.mockResolvedValueOnce({
+      status: 'completed',
+      report,
+      reportFiles: { directory: '/work/depsherpa-report', files: [] },
+      comment: 'skipped',
+    });
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith('DepSherpa verdict: needs_repair');
+  });
+
+  it('stays green when fail-on is empty or does not include the verdict', async () => {
+    core.getInput.mockImplementation((name: string) => (name === 'fail-on' ? 'blocked' : (inputs[name] ?? '')));
+    const report = sampleIsolatedUpgradeReport({ verdict: 'ready_for_review' });
+    runAction.mockResolvedValueOnce({
+      status: 'completed',
+      report,
+      reportFiles: { directory: '/work/depsherpa-report', files: [] },
+      comment: 'skipped',
+    });
+    await run();
+    expect(core.setFailed).not.toHaveBeenCalled();
+  });
+
   it('records a notice and uploads nothing when the run was skipped', async () => {
     runAction.mockResolvedValueOnce({ status: 'skipped', reason: 'nothing to investigate' });
     await run();

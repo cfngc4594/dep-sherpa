@@ -22,9 +22,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: cfngc4594/dep-sherpa@main
+      - uses: cfngc4594/dep-sherpa@v1
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}   # optional; omit to run recipes only
+          fail-on: needs_repair,blocked   # optional; omit for report-only (step stays green)
 ```
 
 When Dependabot or Renovate opens a PR that changes one dependency in `package.json`, DepSherpa reads the change from the base and head manifests, checks out the base commit in a separate clone, and runs the upgrade there. The PR receives a comment like:
@@ -45,7 +46,7 @@ on:
       package: { description: npm package, required: true }
       version: { description: exact target version, required: true }
 # ...
-      - uses: cfngc4594/dep-sherpa@main
+      - uses: cfngc4594/dep-sherpa@v1
         with:
           package: ${{ inputs.package }}
           version: ${{ inputs.version }}
@@ -64,6 +65,8 @@ on:
 | `openai-base-url` | `https://api.openai.com/v1` | any OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter, self-hosted) |
 | `github-token` | `${{ github.token }}` | used only for the comment |
 | `report-dir` | `depsherpa-report` | where report files are written and uploaded from |
+| `upload-artifact` | `true` | upload `report.json`, `report.md`, and `candidate.patch` as the `depsherpa-report` artifact |
+| `fail-on` | empty | comma-separated verdicts that fail the step after the report (for example `needs_repair,blocked`) |
 
 Outputs: `verdict` (`ready_for_review`, `repaired_ready_for_review`, `needs_repair`, `inconclusive`, `blocked`, or `skipped`), `repair-status`, `report-dir`.
 

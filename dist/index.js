@@ -128946,6 +128946,14 @@ function requireSemver () {
 var semverExports = requireSemver();
 var semver = /*@__PURE__*/getDefaultExportFromCjs(semverExports);
 
+/** Verdicts that may appear in `fail-on` (excludes `skipped`, which never completes a report). */
+const FAIL_ON_VERDICTS = [
+    'ready_for_review',
+    'repaired_ready_for_review',
+    'needs_repair',
+    'inconclusive',
+    'blocked',
+];
 const npmPackageName = /^(?:@[a-z0-9][a-z0-9._-]*\/)?[a-z0-9][a-z0-9._-]*$/;
 /** Only a valid lowercase npm package name may reach the core. */
 function validatePackageName(value) {
@@ -128983,6 +128991,24 @@ function optionalText(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
 }
+/** Comma- or whitespace-separated verdict names; empty means report-only (never fail on verdict). */
+function parseFailOn(value) {
+    const trimmed = value?.trim();
+    if (!trimmed)
+        return new Set();
+    const allowed = new Set(FAIL_ON_VERDICTS);
+    const result = new Set();
+    for (const part of trimmed.split(/[,\s]+/)) {
+        const token = part.trim();
+        if (!token)
+            continue;
+        if (!allowed.has(token)) {
+            throw new Error(`fail-on contains unknown verdict "${token}"; expected one of: ${FAIL_ON_VERDICTS.join(', ')}.`);
+        }
+        result.add(token);
+    }
+    return result;
+}
 function readActionInputs(getInput) {
     const outputDir = optionalText(getInput('report-dir')) ?? 'depsherpa-report';
     if (outputDir.startsWith('/') || /^[A-Za-z]:/.test(outputDir) || outputDir.split(/[\\/]/).includes('..')) {
@@ -128999,6 +129025,7 @@ function readActionInputs(getInput) {
         openaiBaseUrl: optionalText(getInput('openai-base-url')),
         openaiApiKey: optionalText(getInput('openai-api-key')),
         githubToken: optionalText(getInput('github-token')),
+        failOn: parseFailOn(getInput('fail-on')),
     };
 }
 /**
@@ -156362,9 +156389,11 @@ async function run() {
         }
         if (inputs.uploadArtifact)
             await uploadReportArtifact(outcome);
+        if (inputs.failOn.has(outcome.report.verdict)) {
+            setFailed(`DepSherpa verdict: ${outcome.report.verdict}`);
+        }
     }
     catch (error) {
-        // Fail the workflow run only for invalid inputs or infrastructure errors; never for a verdict.
         setFailed(error instanceof Error ? error.message : String(error));
     }
 }
@@ -156375,4 +156404,3 @@ async function run() {
  */
 /* istanbul ignore next */
 run();
-//# sourceMappingURL=index.js.map

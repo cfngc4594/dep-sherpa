@@ -39,6 +39,12 @@ inputs:
     description: Upload report.json, report.md, and candidate.patch as the `depsherpa-report` artifact.
     required: false
     default: 'true'
+  fail-on:
+    description: >-
+      Comma-separated verdicts that fail the workflow step after the report is written
+      (for example `needs_repair,blocked`). Empty (default) keeps report-only behavior.
+    required: false
+    default: ''
   report-dir:
     description: Directory inside the workspace that receives the report files.
     required: false

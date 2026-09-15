@@ -11,6 +11,7 @@ import { upsertPullRequestComment, type IssuesApi } from '../../src/action/githu
 import {
   modelEnvironment,
   parseBooleanInput,
+  parseFailOn,
   readActionInputs,
   validatePackageName,
   validateTargetVersion,
@@ -103,6 +104,7 @@ const defaultInputs: ActionInputs = {
   openaiBaseUrl: null,
   openaiApiKey: null,
   githubToken: 'ghs_test',
+  failOn: new Set(),
 };
 
 function inputReader(values: Record<string, string>): (name: string) => string {
@@ -174,6 +176,13 @@ describe('action inputs and context', () => {
     });
     expect(() => readActionInputs(inputReader({ 'report-dir': '../outside' }))).toThrow('relative path');
     expect(() => readActionInputs(inputReader({ 'report-dir': '/etc' }))).toThrow('relative path');
+  });
+
+  it('parses fail-on verdict lists and rejects unknown tokens', () => {
+    expect(parseFailOn('')).toEqual(new Set());
+    expect(parseFailOn('needs_repair, blocked')).toEqual(new Set(['needs_repair', 'blocked']));
+    expect(readActionInputs(inputReader({ 'fail-on': 'inconclusive' })).failOn).toEqual(new Set(['inconclusive']));
+    expect(() => parseFailOn('needs_repair,skipped')).toThrow('unknown verdict');
   });
 
   it('accepts only valid npm names and exact versions', () => {
