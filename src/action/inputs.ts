@@ -1,4 +1,16 @@
 import semver from 'semver';
+import type { IsolatedUpgradeReport } from '../core/types.js';
+
+/** Verdicts that may appear in `fail-on` (excludes `skipped`, which never completes a report). */
+export const FAIL_ON_VERDICTS = [
+  'ready_for_review',
+  'repaired_ready_for_review',
+  'needs_repair',
+  'inconclusive',
+  'blocked',
+] as const satisfies readonly IsolatedUpgradeReport['verdict'][];
+
+export type FailOnVerdict = (typeof FAIL_ON_VERDICTS)[number];
 
 /**
  * Inputs the GitHub Action accepts, read through `@actions/core`'s `getInput`.
@@ -18,6 +30,8 @@ export interface ActionInputs {
   openaiBaseUrl: string | null;
   openaiApiKey: string | null;
   githubToken: string | null;
+  /** When the report verdict is listed here, the workflow step fails after outputs are set. */
+  failOn: ReadonlySet<FailOnVerdict>;
 }
 
 export type InputValidation = { ok: true; value: string } | { ok: false; message: string };
@@ -61,6 +75,25 @@ function optionalText(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** Comma- or whitespace-separated verdict names; empty means report-only (never fail on verdict). */
+export function parseFailOn(value: string | undefined): ReadonlySet<FailOnVerdict> {
+  const trimmed = value?.trim();
+  if (!trimmed) return new Set();
+  const allowed = new Set<string>(FAIL_ON_VERDICTS);
+  const result = new Set<FailOnVerdict>();
+  for (const part of trimmed.split(/[,\s]+/)) {
+    const token = part.trim();
+    if (!token) continue;
+    if (!allowed.has(token)) {
+      throw new Error(
+        `fail-on contains unknown verdict "${token}"; expected one of: ${FAIL_ON_VERDICTS.join(', ')}.`,
+      );
+    }
+    result.add(token as FailOnVerdict);
+  }
+  return result;
+}
+
 export type InputReader = (name: string) => string;
 
 export function readActionInputs(getInput: InputReader): ActionInputs {
@@ -79,6 +112,7 @@ export function readActionInputs(getInput: InputReader): ActionInputs {
     openaiBaseUrl: optionalText(getInput('openai-base-url')),
     openaiApiKey: optionalText(getInput('openai-api-key')),
     githubToken: optionalText(getInput('github-token')),
+    failOn: parseFailOn(getInput('fail-on')),
   };
 }
 

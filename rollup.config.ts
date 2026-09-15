@@ -11,7 +11,7 @@ const config = {
     esModule: true,
     file: 'dist/index.js',
     format: 'es',
-    sourcemap: true,
+    sourcemap: false,
     inlineDynamicImports: true,
   },
   plugins: [typescript(), nodeResolve({ preferBuiltins: true }), commonjs(), json()],

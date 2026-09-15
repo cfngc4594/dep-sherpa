@@ -70,8 +70,10 @@ export async function run(): Promise<void> {
       return;
     }
     if (inputs.uploadArtifact) await uploadReportArtifact(outcome);
+    if (inputs.failOn.has(outcome.report.verdict)) {
+      core.setFailed(`DepSherpa verdict: ${outcome.report.verdict}`);
+    }
   } catch (error) {
-    // Fail the workflow run only for invalid inputs or infrastructure errors; never for a verdict.
     core.setFailed(error instanceof Error ? error.message : String(error));
   }
 }
