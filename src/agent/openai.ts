@@ -138,6 +138,11 @@ async function requestCompletion(
   client: OpenAI,
   params: Omit<ChatCompletionCreateParamsNonStreaming, 'response_format'>,
 ): Promise<string | null> {
+  const requestJsonObject = async (): Promise<string | null> => {
+    const completion = await client.chat.completions.create({ ...params, response_format: { type: 'json_object' } });
+    return completionMessageContent(completion);
+  };
+
   try {
     const completion = await client.chat.completions.create({
       ...params,
@@ -146,12 +151,14 @@ async function requestCompletion(
         json_schema: { name: 'repair_generation', strict: true, schema: repairGenerationJsonSchema() },
       },
     });
-    return completionMessageContent(completion);
+    const content = completionMessageContent(completion);
+    if (content?.trim()) return content;
+    // Some gateways accept json_schema but return an empty message; fall back and rely on Zod.
+    return requestJsonObject();
   } catch (error) {
     // Providers without json_schema support answer 400; fall back to json_object and rely on Zod.
     if (!(error instanceof APIError) || error.status !== 400) throw error;
-    const completion = await client.chat.completions.create({ ...params, response_format: { type: 'json_object' } });
-    return completionMessageContent(completion);
+    return requestJsonObject();
   }
 }
 

@@ -197,6 +197,22 @@ describe('OpenAI-compatible proposal generator', () => {
     expect(calls[0].body).not.toHaveProperty('tool_choice');
   });
 
+  it('falls back to json_object when json_schema succeeds with empty content', async () => {
+    const { impl, calls } = fakeFetch((_request, call) =>
+      call === 1
+        ? completion(null)
+        : completion(JSON.stringify({ outcome: 'no_proposal', reason: 'Insufficient evidence.', proposal: null })),
+    );
+    const generate = createOpenAIProposalGenerator(
+      { provider: 'openai-compatible', baseURL: 'https://llm.example/v1', apiKey: 'k', model: 'local' },
+      { fetch: impl },
+    );
+    await expect(generate(context)).resolves.toEqual({ status: 'no_proposal', reason: 'Insufficient evidence.' });
+    expect(calls).toHaveLength(2);
+    expect(calls[0].body.response_format).toMatchObject({ type: 'json_schema' });
+    expect(calls[1].body.response_format).toEqual({ type: 'json_object' });
+  });
+
   it('falls back to json_object when a provider rejects json_schema', async () => {
     const { impl, calls } = fakeFetch((_request, call) =>
       call === 1
