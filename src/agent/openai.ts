@@ -150,7 +150,9 @@ async function requestCompletion(
   }
 }
 
-function completionMessageContent(completion: { choices?: Array<{ message?: { content?: string | null } }> }): string | null {
+function completionMessageContent(completion: {
+  choices?: Array<{ message?: { content?: string | null } }>;
+}): string | null {
   return completion.choices?.[0]?.message?.content ?? null;
 }
 
