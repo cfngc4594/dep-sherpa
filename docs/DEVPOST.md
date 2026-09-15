@@ -18,6 +18,11 @@ Model proposals use the official `openai` SDK against any OpenAI-compatible endp
 
 Judges can reproduce the isolated upgrade and the complete Zod repair without any credentials, and the GitHub Action path is covered by tests against a shallow pull request checkout.
 
+**Public demo repository:** [depsherpa-zod-demo](https://github.com/cfngc4594/depsherpa-zod-demo)
+
+- [PR #1 — Zod 3.23.8 → 4.1.5 (deterministic recipe repair)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1): DepSherpa comment shows `repaired · ready for review` with a verified recipe patch.
+- [PR #2 — Zod 3.23.8 → 4.6.5 (generic / model path)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2): when no recipe covers the failure, the report may include a bounded model proposal (repository secret configured on the demo).
+
 ## Built With
 
 - GitHub Actions
@@ -49,11 +54,14 @@ Then exercise the public paths:
 1. **GitHub Action**  
    Add the workflow from the README to any npm repository and open a pull request that bumps one dependency in `package.json`; the PR receives the report comment and the run uploads the `depsherpa-report` artifact. Locally, `npm test -- __tests__/action` runs the same orchestration against a shallow Dependabot-style checkout.
 
-2. **Isolated upgrade + deterministic repair**  
+2. **Live GitHub Action on the demo repo**  
+   Open [depsherpa-zod-demo PR #1](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1) for the recipe path, or [PR #2](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2) for a major jump where a model proposal may appear. Each pull request has a DepSherpa report comment, job summary, and artifact.
+
+3. **Isolated upgrade + deterministic repair (local)**  
    `npm run demo:repair`  
    Expect a disposable clone, a Zod 3→4 typecheck failure, a one-line `.errors` → `.issues` repair, green verification, and `repaired_ready_for_review`. The source fixture is not modified.
 
-3. **Local inspect on this repo**  
+4. **Local inspect on this repo**  
    `npm run depsherpa -- inspect . zod 4.1.5`  
    Confirm the Markdown packet names the version jump, discovered checks, and the human gate.
 

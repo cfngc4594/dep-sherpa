@@ -101,10 +101,16 @@ describe('main.ts', () => {
     deps.setOutput('verdict', 'blocked');
     deps.log('hello');
     deps.warn('careful');
+    deps.warnAt('typed issue', { file: 'src/a.ts', startLine: 2 });
     expect(core.summaryWrites).toEqual(['# summary']);
     expect(core.setOutput).toHaveBeenCalledWith('verdict', 'blocked');
     expect(core.info).toHaveBeenCalledWith('hello');
     expect(core.warning).toHaveBeenCalledWith('careful');
+    expect(core.warning).toHaveBeenCalledWith('typed issue', {
+      file: 'src/a.ts',
+      startLine: 2,
+      endLine: 2,
+    });
 
     // The comment publisher goes through Octokit and creates the marked comment.
     expect(deps.publishComment).not.toBeNull();

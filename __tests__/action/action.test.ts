@@ -4,7 +4,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import { sampleIsolatedUpgradeReport, sampleRepairAttempt } from '../../__fixtures__/report.js';
+import { workflowDiagnosticAnnotations } from '../../src/action/annotations.js';
 import { commentMarker, renderPullRequestComment } from '../../src/action/comment.js';
+import { renderInvestigationMermaid } from '../../src/action/pipeline-diagram.js';
 import { contextFromGitHub, pullRequestFromPayload, type GitHubContext } from '../../src/action/context.js';
 import { detectDependencyChange, exactVersionFromRange } from '../../src/action/detect.js';
 import { upsertPullRequestComment, type IssuesApi } from '../../src/action/github.js';
@@ -135,10 +137,11 @@ interface Sinks {
   outputs: Record<string, string>;
   comments: string[];
   warnings: string[];
+  annotations: Array<{ message: string; file: string; startLine: number }>;
 }
 
 function dependencies(overrides: Partial<ActionRunDependencies> = {}) {
-  const sinks: Sinks = { summary: [], outputs: {}, comments: [], warnings: [] };
+  const sinks: Sinks = { summary: [], outputs: {}, comments: [], warnings: [], annotations: [] };
   const upgrade = jest.fn<ActionRunDependencies['upgrade']>(async () => sampleIsolatedUpgradeReport());
   const deps: ActionRunDependencies = {
     upgrade,
@@ -156,6 +159,9 @@ function dependencies(overrides: Partial<ActionRunDependencies> = {}) {
     log: () => {},
     warn: (message) => {
       sinks.warnings.push(message);
+    },
+    warnAt: (message, location) => {
+      sinks.annotations.push({ message, file: location.file, startLine: location.startLine });
     },
     ...overrides,
   };
@@ -315,6 +321,27 @@ describe('dependency change detection', () => {
   });
 });
 
+describe('workflow annotations and pipeline diagram', () => {
+  it('maps repair context to repository-relative file annotations', () => {
+    const report = sampleIsolatedUpgradeReport();
+    expect(workflowDiagnosticAnnotations(report)).toEqual([
+      {
+        file: 'src/validation.ts',
+        startLine: 4,
+        endLine: 4,
+        message: expect.stringContaining("Property 'errors'"),
+      },
+    ]);
+  });
+
+  it('renders a mermaid stage diagram for comments', () => {
+    const diagram = renderInvestigationMermaid(sampleIsolatedUpgradeReport());
+    expect(diagram).toContain('```mermaid');
+    expect(diagram).toContain('flowchart LR');
+    expect(diagram).toContain('verdict repaired');
+  });
+});
+
 describe('pull request comment', () => {
   it('summarizes the report, marks model output as a suggestion, and never offers to apply anything', () => {
     const report = sampleIsolatedUpgradeReport({
@@ -326,6 +353,7 @@ describe('pull request comment', () => {
     });
     const body = renderPullRequestComment(report, { runUrl: 'https://github.com/acme/app/actions/runs/1' });
     expect(body.startsWith(commentMarker)).toBe(true);
+    expect(body).toContain('```mermaid');
     expect(body).toContain('`zod` 3.23.8 → 4.1.5 — **repaired · ready for review**');
     expect(body).toContain('| typecheck | passed | failed | introduced failure |');
     expect(body).toContain('model proposal `agent-1` (a suggestion, not a guarantee)');

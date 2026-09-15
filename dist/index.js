@@ -125970,6 +125970,35 @@ If the error persists, please check whether Actions and API requests are operati
     }
 }
 
+function escapeMermaidLabel(value) {
+    return value.replace(/"/g, '\\"').replace(/\[/g, '\\[').replace(/\]/g, '\\]');
+}
+function stageLabel(name, ok) {
+    return escapeMermaidLabel(`${name} ${ok ? 'ok' : 'failed'}`);
+}
+function repairStageLabel(report) {
+    if (!report.repair.requested)
+        return 'repair skipped';
+    return report.repair.status.replace(/_/g, ' ');
+}
+/** Compact Mermaid diagram for pull-request comments (GitHub renders ```mermaid fences). */
+function renderInvestigationMermaid(report) {
+    const prepOk = report.preparation.status === 'passed';
+    const upgradeOk = report.upgrade.status === 'passed';
+    const introduced = report.comparisons.some((comparison) => comparison.state === 'introduced_failure');
+    const compareLabel = introduced ? 'checks introduced failure' : 'checks compared';
+    const verdict = report.verdict.replace(/_/g, ' ');
+    return [
+        '```mermaid',
+        'flowchart LR',
+        `  prep["${stageLabel('prepare', prepOk)}"] --> upg["${stageLabel('upgrade', upgradeOk)}"]`,
+        `  upg --> cmp["${escapeMermaidLabel(compareLabel)}"]`,
+        `  cmp --> rep["${escapeMermaidLabel(repairStageLabel(report))}"]`,
+        `  rep --> out["${escapeMermaidLabel(`verdict ${verdict}`)}"]`,
+        '```',
+    ].join('\n');
+}
+
 /**
  * Compact pull-request comment. The complete Markdown report goes to the job
  * summary and the artifact; the comment stays under GitHub's size limit and
@@ -126011,6 +126040,8 @@ function renderPullRequestComment(report, links) {
         `### DepSherpa · \`${finding.packageName}\` ${from} → ${finding.targetVersion} — **${verdictLabels[report.verdict]}**`,
         '',
         `Ran in a disposable clone of \`${report.source.gitHead.slice(0, 7)}\` with npm lifecycle scripts blocked. Nothing was written to this repository, no commit or push was made, and this comment is a report, not an approval.`,
+        '',
+        renderInvestigationMermaid(report),
         '',
     ];
     if (report.preparation.status !== 'passed' || report.upgrade.status !== 'passed') {
@@ -154870,6 +154901,75 @@ The candidate ran only in a disposable clone. Recipe output and model output are
 `;
 }
 
+const sourcePathPattern = /([A-Za-z0-9_./@-]+\.(?:tsx?|jsx?))(?:\((\d+),\d+\)|:(\d+):\d+)/;
+function normalizeRepoRelativePath(value) {
+    const normalized = value.replace(/\\/g, '/').replace(/^\.\//, '');
+    if (pathLooksAbsolute(normalized))
+        return null;
+    if (!normalized || normalized.split('/').includes('..'))
+        return null;
+    return normalized;
+}
+function pathLooksAbsolute(value) {
+    return value.startsWith('/') || /^[A-Za-z]:/.test(value);
+}
+function locationFromText(text) {
+    const match = text.match(sourcePathPattern);
+    if (!match)
+        return null;
+    const file = normalizeRepoRelativePath(match[1].trim());
+    const line = Number(match[2] ?? match[3]);
+    if (!file || !Number.isInteger(line) || line < 1)
+        return null;
+    return { file, line };
+}
+const maxAnnotations = 10;
+const maxMessageLength = 240;
+/**
+ * Turns bounded repair context and check diagnostics into workflow annotations.
+ * Absolute clone paths are skipped because GitHub only accepts repository-relative files.
+ */
+function workflowDiagnosticAnnotations(report) {
+    const seen = new Set();
+    const annotations = [];
+    const push = (file, line, message) => {
+        const normalized = normalizeRepoRelativePath(file);
+        if (!normalized || !Number.isInteger(line) || line < 1)
+            return;
+        const key = `${normalized}:${line}`;
+        if (seen.has(key))
+            return;
+        seen.add(key);
+        annotations.push({
+            file: normalized,
+            startLine: line,
+            endLine: line,
+            message: message.trim().slice(0, maxMessageLength),
+        });
+    };
+    for (const excerpt of report.repair.contextRead) {
+        const located = locationFromText(excerpt.diagnostic);
+        push(located?.file ?? excerpt.path, located?.line ?? excerpt.startLine, excerpt.diagnostic);
+        if (annotations.length >= maxAnnotations)
+            return annotations;
+    }
+    for (const suggestion of report.repairSuggestions) {
+        const located = locationFromText(suggestion.evidence);
+        if (located)
+            push(located.file, located.line, suggestion.evidence);
+        if (annotations.length >= maxAnnotations)
+            return annotations;
+    }
+    for (const edit of report.repair.proposal?.edits ?? []) {
+        const located = locationFromText(edit.diagnostic);
+        if (located)
+            push(located.file, located.line, edit.diagnostic);
+        if (annotations.length >= maxAnnotations)
+            return annotations;
+    }
+    return annotations;
+}
+
 /**
  * Derives the single dependency change a pull request proposes by comparing the
  * base and head manifests. Dependabot and Renovate open one PR per dependency,
@@ -155051,6 +155151,13 @@ async function runAction(input, deps) {
         deps.setOutput('package', target.packageName);
         deps.setOutput('target-version', target.targetVersion);
         deps.log(`Verdict: ${report.verdict} · repair: ${report.repair.status} · ${report.changedFiles.length} file(s) changed in the disposable clone.`);
+        for (const annotation of workflowDiagnosticAnnotations(report)) {
+            deps.warnAt(annotation.message, {
+                file: annotation.file,
+                startLine: annotation.startLine,
+                endLine: annotation.endLine,
+            });
+        }
         const comment = await publishComment(input, report, deps);
         return { status: 'completed', report, reportFiles: { directory: reportDirectory, files }, comment };
     }
@@ -156382,6 +156489,11 @@ async function run() {
             setOutput: (name, value) => setOutput(name, value),
             log: (message) => info(message),
             warn: (message) => warning(message),
+            warnAt: (message, location) => warning(message, {
+                file: location.file,
+                startLine: location.startLine,
+                endLine: location.endLine ?? location.startLine,
+            }),
         });
         if (outcome.status === 'skipped') {
             notice(`DepSherpa skipped: ${outcome.reason}`);

@@ -1,7 +1,7 @@
 {
   "name": "dep-sherpa",
   "description": "Evidence-first dependency upgrade reports for pull requests, run in an isolated clone with a human decision gate.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "cfngc4594",
   "type": "module",
   "private": true,
