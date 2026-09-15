@@ -5,6 +5,7 @@ import { createOpenAIProposalGenerator, describeModelConfig, resolveModelConfig 
 import { renderIsolatedUpgradeReport } from '../core/report.js';
 import type { IsolatedUpgradeReport, PackageManifest } from '../core/types.js';
 import type { IsolatedUpgradeOptions } from '../core/upgrade.js';
+import { workflowDiagnosticAnnotations } from './annotations.js';
 import { renderPullRequestComment } from './comment.js';
 import type { GitHubContext } from './context.js';
 import { detectDependencyChange } from './detect.js';
@@ -33,6 +34,7 @@ export interface ActionRunDependencies {
   setOutput: (name: string, value: string) => void;
   log: (message: string) => void;
   warn: (message: string) => void;
+  warnAt: (message: string, location: { file: string; startLine: number; endLine?: number }) => void;
 }
 
 export interface ReportFiles {
@@ -187,6 +189,13 @@ export async function runAction(input: ActionRunInput, deps: ActionRunDependenci
     deps.log(
       `Verdict: ${report.verdict} · repair: ${report.repair.status} · ${report.changedFiles.length} file(s) changed in the disposable clone.`,
     );
+    for (const annotation of workflowDiagnosticAnnotations(report)) {
+      deps.warnAt(annotation.message, {
+        file: annotation.file,
+        startLine: annotation.startLine,
+        endLine: annotation.endLine,
+      });
+    }
     const comment = await publishComment(input, report, deps);
     return { status: 'completed', report, reportFiles: { directory: reportDirectory, files }, comment };
   } finally {

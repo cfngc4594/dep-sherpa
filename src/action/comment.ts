@@ -1,4 +1,5 @@
 import type { IsolatedUpgradeReport } from '../core/types.js';
+import { renderInvestigationMermaid } from './pipeline-diagram.js';
 
 /**
  * Compact pull-request comment. The complete Markdown report goes to the job
@@ -47,6 +48,8 @@ export function renderPullRequestComment(report: IsolatedUpgradeReport, links: {
     `### DepSherpa · \`${finding.packageName}\` ${from} → ${finding.targetVersion} — **${verdictLabels[report.verdict]}**`,
     '',
     `Ran in a disposable clone of \`${report.source.gitHead.slice(0, 7)}\` with npm lifecycle scripts blocked. Nothing was written to this repository, no commit or push was made, and this comment is a report, not an approval.`,
+    '',
+    renderInvestigationMermaid(report),
     '',
   ];
 

@@ -62,6 +62,12 @@ export async function run(): Promise<void> {
         setOutput: (name, value) => core.setOutput(name, value),
         log: (message) => core.info(message),
         warn: (message) => core.warning(message),
+        warnAt: (message, location) =>
+          core.warning(message, {
+            file: location.file,
+            startLine: location.startLine,
+            endLine: location.endLine ?? location.startLine,
+          }),
       },
     );
 

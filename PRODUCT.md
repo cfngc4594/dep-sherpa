@@ -50,6 +50,7 @@ The name is DepSherpa. The voice is precise, calm, and candid about uncertainty.
 
 ## Evidence on Hand
 
+- **Public demo:** [depsherpa-zod-demo](https://github.com/cfngc4594/depsherpa-zod-demo) — [PR #1 (recipe repair, Zod 4.1.5)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/1) and [PR #2 (needs repair / model path, Zod 4.6.5)](https://github.com/cfngc4594/depsherpa-zod-demo/pull/2) each carry a live DepSherpa report comment and CI artifact.
 - `npm run demo:repair` runs a real isolated Zod 3→4 upgrade against a committed fixture, including a failing typecheck, a bounded repair, and a green verification run.
 - The local npm runner records baseline and candidate checks, classifies introduced versus pre-existing failures, retains bounded first-error diagnostics with check-specific next steps, and emits a manifest/lockfile patch from a disposable clone.
 - A real Zod 3.23.8→4.1.5 run produced the expected TypeScript failures, changed one compiler-attributed source line, passed all four post-repair checks, and returned `repaired_ready_for_review` without changing the source repository.
