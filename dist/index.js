@@ -129022,6 +129022,15 @@ function optionalText(value) {
     const trimmed = value?.trim();
     return trimmed ? trimmed : null;
 }
+/** First non-empty trimmed string wins; used for defaults with explicit overrides. */
+function coalesceConfiguredText(...values) {
+    for (const value of values) {
+        const trimmed = value?.trim();
+        if (trimmed)
+            return trimmed;
+    }
+    return undefined;
+}
 /** Comma- or whitespace-separated verdict names; empty means report-only (never fail on verdict). */
 function parseFailOn(value) {
     const trimmed = value?.trim();
@@ -129065,11 +129074,13 @@ function readActionInputs(getInput) {
  * touching the runner environment.
  */
 function modelEnvironment(inputs, env) {
+    const baseURL = coalesceConfiguredText(inputs.openaiBaseUrl, env.OPENAI_BASE_URL, env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL);
+    const model = coalesceConfiguredText(inputs.model, env.OPENAI_MODEL, env.DEPSHERPA_MODEL, env.DEPSHERPA_DEFAULT_OPENAI_MODEL);
     return {
         ...env,
         ...(inputs.openaiApiKey ? { OPENAI_API_KEY: inputs.openaiApiKey } : {}),
-        ...(inputs.openaiBaseUrl ? { OPENAI_BASE_URL: inputs.openaiBaseUrl } : {}),
-        ...(inputs.model ? { DEPSHERPA_MODEL: inputs.model } : {}),
+        ...(baseURL ? { OPENAI_BASE_URL: baseURL } : {}),
+        ...(model ? { OPENAI_MODEL: model, DEPSHERPA_MODEL: model } : {}),
     };
 }
 
@@ -154603,7 +154614,8 @@ function superRefine(fn, params) {
  * Configuration is environment-only so it works identically from the CLI and
  * from GitHub Actions:
  *
- * - `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, `DEPSHERPA_MODEL`) → any
+ * - `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`, `OPENAI_MODEL` / `DEPSHERPA_MODEL`,
+ *   and optional `DEPSHERPA_DEFAULT_*` fallbacks) → any
  *   OpenAI-compatible provider.
  * - Nothing configured → proposals are simply unavailable; recipes still work.
  *
@@ -154613,21 +154625,22 @@ function superRefine(fn, params) {
  */
 const defaultOpenAIModel = 'gpt-4.1-mini';
 function resolveModelConfig(env = process.env) {
-    const model = env.DEPSHERPA_MODEL?.trim() || undefined;
     const apiKey = env.OPENAI_API_KEY?.trim() || undefined;
-    const baseURL = env.OPENAI_BASE_URL?.trim() || undefined;
+    const baseURL = coalesceConfiguredText(env.OPENAI_BASE_URL, env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL);
+    const model = coalesceConfiguredText(env.OPENAI_MODEL, env.DEPSHERPA_MODEL, env.DEPSHERPA_DEFAULT_OPENAI_MODEL) ??
+        defaultOpenAIModel;
     if (apiKey || baseURL) {
         // Some self-hosted OpenAI-compatible servers accept any key; the SDK still requires one.
         return {
             provider: 'openai-compatible',
             baseURL,
             apiKey: apiKey ?? 'no-key-required',
-            model: model ?? defaultOpenAIModel,
+            model,
         };
     }
     return {
         provider: 'none',
-        reason: 'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL and DEPSHERPA_MODEL) to enable model proposals; recipes run without one.',
+        reason: 'No model is configured. Set OPENAI_API_KEY (optionally OPENAI_BASE_URL, OPENAI_MODEL, and DEPSHERPA_DEFAULT_* fallbacks) to enable model proposals; recipes run without one.',
     };
 }
 function describeModelConfig(config) {

@@ -50,13 +50,16 @@ inputs:
     required: false
     default: depsherpa-report
   model:
-    description: Model identifier sent to the OpenAI-compatible endpoint. Defaults to gpt-4.1-mini.
+    description: >-
+      Model identifier sent to the OpenAI-compatible endpoint. Leave empty to use OPENAI_MODEL /
+      DEPSHERPA_MODEL / DEPSHERPA_DEFAULT_OPENAI_MODEL from the runner environment, or gpt-4.1-mini.
     required: false
     default: ''
   openai-base-url:
     description: >-
       Base URL of an OpenAI-compatible endpoint (OpenAI, Azure OpenAI v1, OpenRouter,
-      a self-hosted server). Leave empty for api.openai.com.
+      a self-hosted server). Leave empty to use OPENAI_BASE_URL / DEPSHERPA_DEFAULT_OPENAI_BASE_URL
+      from the runner environment, or api.openai.com when none are set.
     required: false
     default: ''
   openai-api-key:

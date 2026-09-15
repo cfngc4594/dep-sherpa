@@ -74,7 +74,7 @@ Outputs: `verdict` (`ready_for_review`, `repaired_ready_for_review`, `needs_repa
 
 The model is only asked for a proposal when the upgrade introduces a failure that no recipe covers. It receives a bounded packet — diagnostics, exact source excerpts, the manifest, declared checks, policy limits, and installed-package version evidence — and can only answer with structured data. Deterministic policy decides whether that data may be applied inside the clone.
 
-- **Any OpenAI-compatible endpoint:** pass `openai-api-key` (from a repository secret) and optionally `openai-base-url` and `model`; most hosted and self-hosted providers speak this format. Locally, set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `DEPSHERPA_MODEL`.
+- **Any OpenAI-compatible endpoint:** pass `openai-api-key` (from a repository secret) and optionally `openai-base-url` and `model`. Empty inputs fall back to runner `OPENAI_BASE_URL` / `OPENAI_MODEL` (or `DEPSHERPA_DEFAULT_*` defaults); workflow inputs and secrets override those. Locally, set `OPENAI_API_KEY`, `OPENAI_BASE_URL`, and `OPENAI_MODEL` (or `DEPSHERPA_MODEL`).
 - **No model:** the report records `agent_unavailable`, keeps the diagnostics and source context for a human, and applies nothing. Recipes such as the Zod 3→4 `ZodError.errors → .issues` migration still run.
 - **Why no zero-configuration option:** GitHub Models — the `GITHUB_TOKEN`-authenticated inference GitHub Actions used to offer — was retired on 2026-07-30 and its endpoint answers HTTP 410. DepSherpa therefore never treats the workflow token as a model credential.
 

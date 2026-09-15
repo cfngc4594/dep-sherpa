@@ -75,6 +75,15 @@ function optionalText(value: string | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
+/** First non-empty trimmed string wins; used for defaults with explicit overrides. */
+export function coalesceConfiguredText(...values: Array<string | null | undefined>): string | undefined {
+  for (const value of values) {
+    const trimmed = value?.trim();
+    if (trimmed) return trimmed;
+  }
+  return undefined;
+}
+
 /** Comma- or whitespace-separated verdict names; empty means report-only (never fail on verdict). */
 export function parseFailOn(value: string | undefined): ReadonlySet<FailOnVerdict> {
   const trimmed = value?.trim();
@@ -123,10 +132,21 @@ export function modelEnvironment(
   inputs: ActionInputs,
   env: Record<string, string | undefined>,
 ): Record<string, string | undefined> {
+  const baseURL = coalesceConfiguredText(
+    inputs.openaiBaseUrl,
+    env.OPENAI_BASE_URL,
+    env.DEPSHERPA_DEFAULT_OPENAI_BASE_URL,
+  );
+  const model = coalesceConfiguredText(
+    inputs.model,
+    env.OPENAI_MODEL,
+    env.DEPSHERPA_MODEL,
+    env.DEPSHERPA_DEFAULT_OPENAI_MODEL,
+  );
   return {
     ...env,
     ...(inputs.openaiApiKey ? { OPENAI_API_KEY: inputs.openaiApiKey } : {}),
-    ...(inputs.openaiBaseUrl ? { OPENAI_BASE_URL: inputs.openaiBaseUrl } : {}),
-    ...(inputs.model ? { DEPSHERPA_MODEL: inputs.model } : {}),
+    ...(baseURL ? { OPENAI_BASE_URL: baseURL } : {}),
+    ...(model ? { OPENAI_MODEL: model, DEPSHERPA_MODEL: model } : {}),
   };
 }
